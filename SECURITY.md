@@ -19,6 +19,21 @@ scope of whatever credentials or filesystem permissions the user has.
 - Misuse of the plugin's tools by a malicious local MCP client — that client
   already runs as the user.
 
+## Credential handling
+
+- **No tokens are read.** `comfy_plugin` reads no API keys, bearer tokens, or
+  credentials of any kind from the environment or configuration files.
+- **`COMFYUI_URL` is the only outbound endpoint** and is entirely
+  user-controlled (default `http://localhost:8188`). The server never opens
+  connections to any other host.
+- **Env values do not appear in tool responses or logs.** The values of
+  `COMFYUI_URL`, `COMFYUI_WORKFLOW_DIR`, and `COMFYUI_ASSET_TTL` are read at
+  startup and are not echoed back in any MCP tool response.
+- **Startup WARNING prints the URL to stderr only.** When ComfyUI is
+  unreachable at startup, the server prints a human-readable warning that
+  includes `COMFYUI_URL` to `stderr`. This is intentional — the URL is not
+  secret — and the warning never appears in MCP tool response payloads.
+
 ## Reporting a vulnerability
 
 For unexpected authority escalation, input validation gaps that escape the

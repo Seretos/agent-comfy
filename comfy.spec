@@ -12,7 +12,7 @@
 # ruff: noqa
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
 ROOT = Path(SPECPATH)
@@ -25,20 +25,22 @@ def _not_cli(name: str) -> bool:
 
 mcp_hiddenimports = collect_submodules("mcp", filter=_not_cli)
 
-extra_hidden = [
-    # FastMCP runtime:
-    "anyio",
-    "pydantic",
-    "pydantic_core",
-    "starlette",
-]
+# Collect native/lazily-generated submodules for each dep that needs it.
+pydantic_d, pydantic_b, pydantic_h = collect_all("pydantic")
+pydantic_core_d, pydantic_core_b, pydantic_core_h = collect_all("pydantic_core")
+httpx_d, httpx_b, httpx_h = collect_all("httpx")
+pillow_d, pillow_b, pillow_h = collect_all("PIL")
+lib_d, lib_b, lib_h = collect_all("lib_python_comfy")
+
+extra_hidden = ["anyio", "starlette"]
 extra_hidden += collect_submodules("comfy_plugin")
+extra_hidden += pydantic_h + pydantic_core_h + httpx_h + pillow_h + lib_h
 
 a = Analysis(
     ["src/comfy_plugin/__main__.py"],
     pathex=[str(ROOT / "src")],
-    binaries=[],
-    datas=[],
+    binaries=[] + pydantic_b + pydantic_core_b + httpx_b + pillow_b + lib_b,
+    datas=[] + pydantic_d + pydantic_core_d + httpx_d + pillow_d + lib_d,
     hiddenimports=mcp_hiddenimports + extra_hidden,
     hookspath=[],
     hooksconfig={},
@@ -47,7 +49,6 @@ a = Analysis(
         "tkinter",
         "matplotlib",
         "numpy",
-        "PIL",
         "test",
         "unittest",
     ],
