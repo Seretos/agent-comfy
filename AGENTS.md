@@ -13,6 +13,7 @@ PyInstaller-frozen Python MCP server, shipped as a self-contained binary (`bin/c
   - `COMFYUI_URL` — root URL of the ComfyUI server (default `http://localhost:8188`). Set this if ComfyUI runs on a non-default port or remote host.
   - `COMFYUI_WORKFLOW_DIR` — optional filesystem path where UI-format workflow JSON files are written for live viewing in the ComfyUI canvas. Unset by default (feature disabled).
   - `COMFYUI_ASSET_TTL` — how long (in integer seconds) to retain fetched assets before they may be evicted. Default `3600` (one hour).
+  - `COMFYUI_SKILLS_DIR` — optional filesystem path where the generated `SKILL.md` model-discovery skill file is written at startup. When unset, the code walks up from `cwd` for a `.git` directory and writes to `<git-root>/.claude/skills/comfy-models/` (also added to `.gitignore`). If neither `.git` nor the env var is present, the feature is disabled.
 - **Skills ship via `skills/`.** Per-medium workflow-authoring skills (image first; audio/video later) live in `skills/` and are bundled into the release zip automatically.
 
 ## Contracts an agent won't infer from the tree
