@@ -307,3 +307,217 @@ def test_config_comfy_url_override():
     finally:
         # Restore config module to the original (no custom env var) state.
         importlib.reload(cfg_mod)
+
+
+# ---------------------------------------------------------------------------
+# run_scaffold — registration
+# ---------------------------------------------------------------------------
+
+
+def test_run_scaffold_registered():
+    """run_scaffold must be registered as an MCP tool."""
+    from comfy_plugin.server import mcp
+
+    tool_names = {t.name for t in mcp._tool_manager.list_tools()}
+    assert "run_scaffold" in tool_names
+
+
+# ---------------------------------------------------------------------------
+# run_scaffold — happy-path & workflow file writing
+# ---------------------------------------------------------------------------
+
+
+async def test_run_scaffold_txt2img_writes_workflow_file(tmp_path):
+    """run_scaffold writes a JSON workflow file with expected ui keys."""
+    import re
+
+    expected_result = _make_run_result(prompt_id="scaffold-1", state=JobState.COMPLETED)
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", str(tmp_path)),
+    ):
+        mock_runner.run = AsyncMock(return_value=expected_result)
+        from comfy_plugin.tools.generation import run_scaffold
+
+        result = await run_scaffold(
+            "txt2img",
+            {"model": "v1.safetensors", "positive": "a cat", "negative": ""},
+        )
+
+    assert result.get("error") is None, f"unexpected error: {result.get('error')}"
+    json_files = list(tmp_path.glob("*.json"))
+    assert len(json_files) == 1
+
+    import json as _json
+
+    data = _json.loads(json_files[0].read_text(encoding="utf-8"))
+    # to_ui always emits these top-level keys
+    for key in ("nodes", "links", "groups", "config", "extra", "version"):
+        assert key in data, f"missing key: {key}"
+
+    # filename pattern: comfy_YYYYMMDD_HHMMSS_ffffff.json
+    assert re.match(r"comfy_\d{8}_\d{6}_\d{6}\.json", json_files[0].name)
+
+
+async def test_run_scaffold_file_written_before_submit(tmp_path):
+    """The workflow file must already exist when runner.run is called."""
+    files_present_at_submit: list[bool] = []
+
+    async def _side_effect(prompt, *, timeout):
+        files_present_at_submit.append(bool(list(tmp_path.glob("*.json"))))
+        return _make_run_result()
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", str(tmp_path)),
+    ):
+        mock_runner.run = _side_effect
+        from comfy_plugin.tools.generation import run_scaffold
+
+        await run_scaffold(
+            "txt2img",
+            {"model": "v1.safetensors", "positive": "cat", "negative": ""},
+        )
+
+    assert files_present_at_submit == [True], "file was not written before runner.run"
+
+
+async def test_run_scaffold_no_write_when_workflow_dir_none(tmp_path):
+    """When workflow_dir is None nothing is written and no error is returned."""
+    expected_result = _make_run_result()
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", None),
+    ):
+        mock_runner.run = AsyncMock(return_value=expected_result)
+        from comfy_plugin.tools.generation import run_scaffold
+
+        result = await run_scaffold(
+            "txt2img",
+            {"model": "v1.safetensors", "positive": "cat", "negative": ""},
+        )
+
+    assert result.get("error") is None, f"unexpected error: {result.get('error')}"
+    # Canary: tmp_path is a clean directory — nothing must have been written to it.
+    assert list(tmp_path.glob("*.json")) == [], "expected no JSON files when workflow_dir is None"
+
+
+async def test_run_scaffold_write_failure_is_swallowed(tmp_path):
+    """An OSError during file write must not propagate — result is still returned."""
+    expected_result = _make_run_result()
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", str(tmp_path)),
+        patch(
+            "comfy_plugin.workflow_export.asyncio.to_thread",
+            side_effect=OSError("disk full"),
+        ),
+    ):
+        mock_runner.run = AsyncMock(return_value=expected_result)
+        from comfy_plugin.tools.generation import run_scaffold
+
+        result = await run_scaffold(
+            "txt2img",
+            {"model": "v1.safetensors", "positive": "cat", "negative": ""},
+        )
+
+    assert result.get("error") is None, f"unexpected error: {result.get('error')}"
+    assert result["state"] == "completed"
+
+
+async def test_run_scaffold_mkdir_creates_missing_directory(tmp_path):
+    """workflow_dir may be a non-existent nested path; it must be created."""
+    nested = tmp_path / "a" / "b" / "c"
+    assert not nested.exists()
+
+    expected_result = _make_run_result()
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", str(nested)),
+    ):
+        mock_runner.run = AsyncMock(return_value=expected_result)
+        from comfy_plugin.tools.generation import run_scaffold
+
+        await run_scaffold(
+            "txt2img",
+            {"model": "v1.safetensors", "positive": "cat", "negative": ""},
+        )
+
+    assert nested.exists()
+    assert list(nested.glob("*.json")), "expected a JSON file inside the created directory"
+
+
+# ---------------------------------------------------------------------------
+# run_scaffold — error paths
+# ---------------------------------------------------------------------------
+
+
+async def test_run_scaffold_unknown_medium():
+    """An unknown medium returns an error dict containing the bad medium name."""
+    from comfy_plugin.tools.generation import run_scaffold
+
+    result = await run_scaffold("txt2gif", {})
+
+    assert "error" in result
+    assert "txt2gif" in result["error"]
+
+
+async def test_run_scaffold_missing_required_param():
+    """Calling txt2img without 'model' returns an error dict (TypeError caught)."""
+    from comfy_plugin.tools.generation import run_scaffold
+
+    result = await run_scaffold("txt2img", {"positive": "cat", "negative": ""})
+
+    assert "error" in result
+
+
+async def test_run_scaffold_connection_error():
+    """ComfyConnectionError from runner.run is caught and returned as error dict."""
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", None),
+    ):
+        mock_runner.run = AsyncMock(
+            side_effect=ComfyConnectionError("connection refused")
+        )
+        from comfy_plugin.tools.generation import run_scaffold
+
+        result = await run_scaffold(
+            "txt2img",
+            {"model": "v1.safetensors", "positive": "cat", "negative": ""},
+        )
+
+    assert "error" in result
+    assert "connection refused" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# run_scaffold — txt2audio and txt2video dispatch
+# ---------------------------------------------------------------------------
+
+
+async def test_run_scaffold_txt2audio_and_txt2video(tmp_path):
+    """txt2audio and txt2video both dispatch correctly, produce no error, write file."""
+    expected_result = _make_run_result()
+
+    for medium, params in [
+        ("txt2audio", {"positive": "rain", "negative": "", "seed": 1}),
+        ("txt2video", {"positive": "wave", "negative": "", "width": 256, "height": 256, "seed": 2}),
+    ]:
+        subdir = tmp_path / medium
+        with (
+            patch("comfy_plugin.tools.generation.runner") as mock_runner,
+            patch("comfy_plugin.config.workflow_dir", str(subdir)),
+        ):
+            mock_runner.run = AsyncMock(return_value=expected_result)
+            from comfy_plugin.tools.generation import run_scaffold
+
+            result = await run_scaffold(medium, params)
+
+        assert result.get("error") is None, f"{medium} returned error: {result.get('error')}"
+        json_files = list(subdir.glob("*.json"))
+        assert len(json_files) == 1, f"{medium}: expected 1 JSON file, got {len(json_files)}"

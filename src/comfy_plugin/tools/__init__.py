@@ -13,6 +13,7 @@ from comfy_plugin.tools.generation import (
     cancel_job,
     get_job,
     get_queue_status,
+    run_scaffold,
     run_template,
     run_workflow,
 )
@@ -31,3 +32,4 @@ def register(mcp: FastMCP) -> None:
     mcp.tool()(list_models)
     mcp.tool()(list_node_types)
     mcp.tool()(get_node_schema)
+    mcp.tool()(run_scaffold)
