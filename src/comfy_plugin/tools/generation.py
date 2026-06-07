@@ -15,15 +15,32 @@ from typing import Any
 
 from lib_python_comfy import (
     ComfyConnectionError,
+    GraphBuilder,
     JobStatus,
     MissingParameterError,
     RunResult,
     load_builtin_template,
     render,
+    to_api,
+    to_ui,
+    txt2audio,
+    txt2img,
+    txt2video,
 )
 
+from comfy_plugin import config
 from comfy_plugin.config import client, runner
+from comfy_plugin.workflow_export import maybe_write_workflow
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_SCAFFOLDS = {
+    "txt2img": txt2img,
+    "txt2audio": txt2audio,
+    "txt2video": txt2video,
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -177,3 +194,90 @@ async def cancel_job(prompt_id: str) -> dict[str, Any]:
         return {"cancelled": prompt_id}
     except ComfyConnectionError as exc:
         return {"error": str(exc)}
+
+
+async def run_scaffold(
+    medium: str,
+    params: dict[str, Any],
+    timeout: float = 120.0,
+) -> dict[str, Any]:
+    """Build a scaffold graph for *medium*, export a UI workflow file, then submit.
+
+    Writes the UI-format workflow JSON to ``COMFYUI_WORKFLOW_DIR`` (if set)
+    *before* submitting so the user can open it in the ComfyUI canvas and
+    watch live node highlighting as the job executes.
+
+    Parameters
+    ----------
+    medium:
+        One of ``"txt2img"``, ``"txt2audio"``, or ``"txt2video"``.
+    params:
+        Flat dict of keyword arguments forwarded to the matching scaffold.
+
+        *txt2img* kwargs:
+            - ``model`` (str, required) — checkpoint filename.
+            - ``positive`` (str, required) — positive prompt.
+            - ``negative`` (str, required) — negative prompt.
+            - ``width`` (int, default 512)
+            - ``height`` (int, default 512)
+            - ``steps`` (int, default 20)
+            - ``cfg`` (float, default 7.0)
+            - ``sampler_name`` (str, default ``"euler"``)
+            - ``scheduler`` (str, default ``"normal"``)
+            - ``seed`` (int, default 0)
+
+        *txt2audio* kwargs:
+            - ``positive`` (str, default ``""``)
+            - ``negative`` (str, default ``""``)
+            - ``seed`` (int, default 0)
+
+        *txt2video* kwargs:
+            - ``positive`` (str, default ``""``)
+            - ``negative`` (str, default ``""``)
+            - ``width`` (int, default 512)
+            - ``height`` (int, default 512)
+            - ``seed`` (int, default 0)
+
+    timeout:
+        Maximum seconds to wait for completion (same semantics as
+        ``run_workflow``).
+
+    Returns
+    -------
+    dict
+        Same shape as ``run_workflow`` on success.
+        ``{"error": "<message>"}`` for unknown medium, bad kwargs, or
+        connection failure.
+    """
+    # 1. Dispatch on medium to get a GraphBuilder.
+    scaffold_fn = _SCAFFOLDS.get(medium)
+    if scaffold_fn is None:
+        return {
+            "error": (
+                f"Unknown scaffold medium: {medium}. "
+                "Use 'txt2img', 'txt2audio', or 'txt2video'."
+            )
+        }
+
+    try:
+        graph: GraphBuilder = scaffold_fn(**params)
+    except TypeError as exc:
+        return {"error": str(exc)}
+
+    # 2. Build the UI dict.
+    ui_dict = to_ui(graph)
+
+    # 3. Write UI workflow to disk before submission (best-effort; OSError swallowed).
+    await maybe_write_workflow(ui_dict, config.workflow_dir)
+
+    # 4. Build the API prompt.
+    prompt = to_api(graph)
+
+    # 5. Submit and wait.
+    try:
+        result: RunResult = await runner.run(prompt, timeout=timeout)
+    except ComfyConnectionError as exc:
+        return {"error": str(exc)}
+
+    # 6. Return in the standard shape.
+    return _run_result_to_dict(result)
