@@ -9,7 +9,10 @@ PyInstaller-frozen Python MCP server, shipped as a self-contained binary (`bin/c
 - **ComfyUI is external and user-managed.** The plugin only connects, via `COMFYUI_URL` (default `http://localhost:8188`); it never starts or supervises ComfyUI. When ComfyUI is unreachable, degrade cleanly instead of crashing the MCP server.
 - **Single-flight is a hard constraint, not an optimization.** Never let more than one request be in flight to ComfyUI at a time (the user's machine processes only one). Submissions are serialized through a lock in the lib.
 - **Two graph formats, identical node IDs.** The graph-builder emits both the **API format** (node-id-keyed `class_type`/`inputs`, sent to `POST /prompt`) and the **UI workflow format** (`nodes`/`links`/positions, openable in the ComfyUI canvas) from one source. The IDs must match across both, or live execution highlighting (driven by the `/ws` socket matching the executing node ID) won't line up with the opened workflow.
-- **Env vars** (document each as it lands): `COMFYUI_URL` (connection), `COMFYUI_WORKFLOW_DIR` (optional — where to drop UI-format workflows for live viewing), plus asset-TTL and similar knobs.
+- **Env vars** (document each as it lands):
+  - `COMFYUI_URL` — root URL of the ComfyUI server (default `http://localhost:8188`). Set this if ComfyUI runs on a non-default port or remote host.
+  - `COMFYUI_WORKFLOW_DIR` — optional filesystem path where UI-format workflow JSON files are written for live viewing in the ComfyUI canvas. Unset by default (feature disabled).
+  - `COMFYUI_ASSET_TTL` — how long (in integer seconds) to retain fetched assets before they may be evicted. Default `3600` (one hour).
 - **Skills ship via `skills/`.** Per-medium workflow-authoring skills (image first; audio/video later) live in `skills/` and are bundled into the release zip automatically.
 
 ## Contracts an agent won't infer from the tree
