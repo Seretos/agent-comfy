@@ -1,6 +1,16 @@
 # agent-comfy
 
-PyInstaller-frozen Python MCP server, shipped as a self-contained binary (`bin/comfy` on Linux, `bin/comfy.exe` on Windows). End users need no Python toolchain.
+PyInstaller-frozen Python MCP server, shipped as a self-contained binary (`bin/comfy` on Linux, `bin/comfy.exe` on Windows). End users need no Python toolchain. It lets an agent drive ComfyUI (an external, user-run GPU service) to generate images/audio/video.
+
+## Architecture & responsibilities
+
+- **This repo is a thin MCP wrapper — all real logic lives in `lib-python-comfy`.** `agent-comfy` only reads config, registers FastMCP tools, calls `lib_python_comfy` functions, and formats results. The ComfyUI HTTP client, queue/poll/retrieve run-flow, asset handling, workflow graph-builder, and model/node discovery all belong in the sibling library `libs/lib-python-comfy`. New functionality goes into the lib first; the wrapper just wires it up.
+- **Lib dependency follows the sibling-lib convention.** `lib-python-comfy` is pulled as `lib-python-comfy @ git+https://github.com/Seretos/lib-python-comfy@release/0.x` (floating minor/patch). For local development run `pip install -e ../../libs/lib-python-comfy` **before** `pip install -e .` so the editable sibling checkout overrides the git-pinned copy.
+- **ComfyUI is external and user-managed.** The plugin only connects, via `COMFYUI_URL` (default `http://localhost:8188`); it never starts or supervises ComfyUI. When ComfyUI is unreachable, degrade cleanly instead of crashing the MCP server.
+- **Single-flight is a hard constraint, not an optimization.** Never let more than one request be in flight to ComfyUI at a time (the user's machine processes only one). Submissions are serialized through a lock in the lib.
+- **Two graph formats, identical node IDs.** The graph-builder emits both the **API format** (node-id-keyed `class_type`/`inputs`, sent to `POST /prompt`) and the **UI workflow format** (`nodes`/`links`/positions, openable in the ComfyUI canvas) from one source. The IDs must match across both, or live execution highlighting (driven by the `/ws` socket matching the executing node ID) won't line up with the opened workflow.
+- **Env vars** (document each as it lands): `COMFYUI_URL` (connection), `COMFYUI_WORKFLOW_DIR` (optional — where to drop UI-format workflows for live viewing), plus asset-TTL and similar knobs.
+- **Skills ship via `skills/`.** Per-medium workflow-authoring skills (image first; audio/video later) live in `skills/` and are bundled into the release zip automatically.
 
 ## Contracts an agent won't infer from the tree
 
@@ -18,4 +28,4 @@ Default is multi-OS (`[windows, linux]`) and the shipped wiring already does it 
 ## Gotchas (the "why" behind the code)
 
 - **`build.ps1` runs under Windows PowerShell 5.1, PS7, and Linux `pwsh`.** It derives `$IsWindows` from `$env:OS` (5.1 lacks the auto variable) and sets no global `$ErrorActionPreference='Stop'` (PyInstaller floods stderr, which 5.1 wraps as ErrorRecords and would trip a global Stop). The smoke step gates the build on a real MCP `initialize` handshake.
-- **Native bindings need `collect_all(...)` in `comfy.spec`** — PyInstaller misses their lazily-generated submodules otherwise. Needing them usually also means you want `OS_TARGETS=[windows]`.
+- **Native bindings need `collect_all(...)` in `comfy.spec`** — PyInstaller misses their lazily-generated submodules otherwise. The runtime deps that pull this in here are `httpx`, `pydantic`, and `Pillow` (via `lib-python-comfy`); add a `collect_all(...)` for each. (For genuinely Win32-bound native bindings this would also imply `OS_TARGETS=[windows]`, but these three are cross-platform.)
