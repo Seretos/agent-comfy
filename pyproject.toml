@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "comfy_plugin"
+version = "0.0.0"
+description = "MCP server for driving ComfyUI - submit workflows, manage the prompt queue, and fetch generated images"
+requires-python = ">=3.11"
+authors = [{ name = "Arne von Appen" }]
+dependencies = [
+  "mcp>=1.2",
+]
+
+[project.optional-dependencies]
+build = [
+  "pyinstaller>=6.10",
+]
+test = [
+  "pytest>=8",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra --strict-markers"
