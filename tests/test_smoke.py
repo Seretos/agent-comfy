@@ -500,24 +500,45 @@ async def test_run_scaffold_connection_error():
 # ---------------------------------------------------------------------------
 
 
-async def test_run_scaffold_txt2audio_and_txt2video(tmp_path):
-    """txt2audio and txt2video both dispatch correctly, produce no error, write file."""
+async def test_run_scaffold_txt2audio(tmp_path):
+    """txt2audio dispatches correctly, produces no error, and writes a workflow file."""
     expected_result = _make_run_result()
+    subdir = tmp_path / "txt2audio"
 
-    for medium, params in [
-        ("txt2audio", {"positive": "rain", "negative": "", "seed": 1}),
-        ("txt2video", {"positive": "wave", "negative": "", "width": 256, "height": 256, "seed": 2}),
-    ]:
-        subdir = tmp_path / medium
-        with (
-            patch("comfy_plugin.tools.generation.runner") as mock_runner,
-            patch("comfy_plugin.config.workflow_dir", str(subdir)),
-        ):
-            mock_runner.run = AsyncMock(return_value=expected_result)
-            from comfy_plugin.tools.generation import run_scaffold
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", str(subdir)),
+    ):
+        mock_runner.run = AsyncMock(return_value=expected_result)
+        from comfy_plugin.tools.generation import run_scaffold
 
-            result = await run_scaffold(medium, params)
+        result = await run_scaffold(
+            "txt2audio",
+            {"model": "audio_model.safetensors", "positive": "rain", "negative": "", "seed": 1},
+        )
 
-        assert result.get("error") is None, f"{medium} returned error: {result.get('error')}"
-        json_files = list(subdir.glob("*.json"))
-        assert len(json_files) == 1, f"{medium}: expected 1 JSON file, got {len(json_files)}"
+    assert result.get("error") is None, f"txt2audio returned error: {result.get('error')}"
+    json_files = list(subdir.glob("*.json"))
+    assert len(json_files) == 1, f"txt2audio: expected 1 JSON file, got {len(json_files)}"
+
+
+async def test_run_scaffold_txt2video_not_implemented(tmp_path):
+    """txt2video returns an error dict because it requires a custom video node (v0.0.2+)."""
+    subdir = tmp_path / "txt2video"
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", str(subdir)),
+    ):
+        mock_runner.run = AsyncMock()
+        from comfy_plugin.tools.generation import run_scaffold
+
+        result = await run_scaffold(
+            "txt2video",
+            {"positive": "wave", "negative": "", "width": 256, "height": 256, "seed": 2},
+        )
+
+    assert "error" in result, "txt2video should return an error dict"
+    assert "custom video-generation node" in result["error"] or "NotImplementedError" in result["error"] or "txt2video" in result["error"]
+    # runner.run should NOT have been called — the error short-circuits before submission
+    mock_runner.run.assert_not_called()
