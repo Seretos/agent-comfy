@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from lib_python_comfy import (
     ComfyConnectionError,
     GraphBuilder,
+    JobState,
     JobStatus,
     MissingParameterError,
     RunResult,
@@ -81,10 +82,19 @@ class Txt2VideoParams(BaseModel):
 
 
 def _run_result_to_dict(result: RunResult) -> dict[str, Any]:
-    """Convert a RunResult to a plain dict with state as a string."""
+    """Convert a RunResult to a plain dict with state as a string.
+
+    ``timed_out`` is ``True`` when the job was still in a ``running`` state at
+    the point the timeout expired.  It is only meaningful in ``run_workflow``
+    and ``run_template`` responses (where a timeout can occur); ``get_job``
+    never sets it.  When ``timed_out`` is ``True``, re-poll via
+    ``get_job(prompt_id)`` until the state becomes ``completed`` or ``error``,
+    or call ``cancel_job(prompt_id)`` to abandon the job.
+    """
     return {
         "prompt_id": result.prompt_id,
         "state": result.state.value,
+        "timed_out": result.state == JobState.RUNNING,
         "outputs": result.outputs,
         "history": result.history,
         "error": result.error,
@@ -109,6 +119,9 @@ def _job_status_to_dict(status: JobStatus) -> dict[str, Any]:
 async def run_workflow(prompt: dict, timeout: float = 120.0) -> dict[str, Any]:
     """Submit an API-format ComfyUI workflow and wait for it to complete.
 
+    Tool-chain tip: use ``get_node_schema(node_type)`` to discover the required
+    and optional inputs for each node before building the ``prompt`` graph.
+
     Parameters
     ----------
     prompt:
@@ -121,8 +134,31 @@ async def run_workflow(prompt: dict, timeout: float = 120.0) -> dict[str, Any]:
     Returns
     -------
     dict
-        Keys: ``prompt_id``, ``state`` (string), ``outputs``, ``history``,
-        ``error``.  On connection failure: ``{"error": "<message>"}``.
+        On success, the following keys are present:
+
+        ``prompt_id`` (str)
+            Unique identifier for the submitted job.  Pass to ``get_job`` or
+            ``cancel_job``.
+        ``state`` (str)
+            One of ``"queued"``, ``"running"``, ``"completed"``, ``"error"``,
+            ``"not_found"``.  A normal successful run ends at ``"completed"``.
+        ``timed_out`` (bool)
+            ``True`` when the job was still running when the timeout expired
+            (``state`` will be ``"running"``).  Re-poll with
+            ``get_job(prompt_id)`` until ``state`` is ``"completed"`` or
+            ``"error"``, or call ``cancel_job(prompt_id)`` to abandon it.
+        ``outputs`` (dict)
+            Node outputs indexed by node ID (may be empty if the job did not
+            complete).
+        ``history`` (dict)
+            Raw ComfyUI history entry.  Most useful sub-keys:
+            ``history["outputs"]`` — per-node output assets,
+            ``history["status"]["status_str"]`` — human-readable status,
+            ``history["status"]["completed"]`` — ``True`` when done.
+        ``error`` (str | None)
+            Error message when ``state`` is ``"error"``; ``None`` otherwise.
+
+        On connection failure: ``{"error": "<message>"}``.
     """
     try:
         result: RunResult = await runner.run(prompt, timeout=timeout)
@@ -135,6 +171,10 @@ async def run_template(
     name: str, params: dict[str, Any], timeout: float = 120.0
 ) -> dict[str, Any]:
     """Load a built-in template, render it with *params*, then submit.
+
+    Tool-chain tip: call ``get_template_params(name)`` first to discover the
+    required and optional parameter keys for the template before calling this
+    function.
 
     Parameters
     ----------
@@ -156,8 +196,20 @@ async def run_template(
     Returns
     -------
     dict
-        Same shape as ``run_workflow``.  On unknown template or missing
-        required parameter: ``{"error": "<message>"}``.
+        Same shape as ``run_workflow``: keys ``prompt_id``, ``state``,
+        ``timed_out``, ``outputs``, ``history``, ``error``.
+
+        When ``timed_out`` is ``True`` (``state`` is ``"running"``), re-poll
+        with ``get_job(prompt_id)`` until ``state`` is ``"completed"`` or
+        ``"error"``, or call ``cancel_job(prompt_id)`` to abandon it.
+
+        The most useful ``history`` sub-keys are ``history["outputs"]``,
+        ``history["status"]["status_str"]``, and
+        ``history["status"]["completed"]``.
+
+        On unknown template or missing required parameter:
+        ``{"error": "<message>"}``.
+        On connection failure: ``{"error": "<message>"}``.
     """
     try:
         template = load_builtin_template(name)
@@ -183,7 +235,33 @@ async def get_job(prompt_id: str) -> dict[str, Any]:
     Returns
     -------
     dict
-        Keys: ``prompt_id``, ``state`` (string), ``history``, ``error``.
+        On success, the following keys are present:
+
+        ``prompt_id`` (str)
+            Echo of the requested identifier.
+        ``state`` (str)
+            One of five values:
+
+            * ``"queued"`` — job is waiting in the queue (non-terminal, keep
+              polling).
+            * ``"running"`` — job is currently executing (non-terminal, keep
+              polling).
+            * ``"completed"`` — job finished successfully (terminal).
+            * ``"error"`` — job finished with an error (terminal).
+            * ``"not_found"`` — the prompt ID is not known to ComfyUI
+              (terminal; the ID may have expired from history).
+
+            Re-poll until ``state`` is ``"completed"``, ``"error"``, or
+            ``"not_found"``.
+        ``history`` (dict)
+            Raw ComfyUI history entry when available.  Most useful sub-keys:
+            ``history["outputs"]`` — per-node output assets,
+            ``history["status"]["status_str"]`` — human-readable status,
+            ``history["status"]["completed"]`` — ``True`` when done.
+            Empty dict when the job has not yet completed or is not found.
+        ``error`` (str | None)
+            Error message when ``state`` is ``"error"``; ``None`` otherwise.
+
         On connection failure: ``{"error": "<message>"}``.
     """
     try:
@@ -194,21 +272,47 @@ async def get_job(prompt_id: str) -> dict[str, Any]:
 
 
 async def get_queue_status() -> dict[str, Any]:
-    """Return the raw ComfyUI queue status dict.
+    """Return a summarised view of the ComfyUI queue.
+
+    This is a read-only probe that intentionally bypasses the submission guard
+    (FlowRunner) so it can be called at any time, even while a job is running.
 
     Returns
     -------
     dict
-        The queue dict from ComfyUI (``queue_running`` and ``queue_pending``
-        lists).  On connection failure: ``{"error": "<message>"}``.
+        ``{"running": [...], "pending": [...]}`` where each entry is a dict
+        with the following keys:
+
+        ``prompt_id`` (str)
+            Identifier of the queued job.
+        ``position`` (int)
+            Zero-based index within its list (0 = next to run/currently
+            running).
+        ``state`` (str)
+            ``"running"`` for entries in the running list, ``"queued"`` for
+            entries in the pending list.
+
+        On connection failure: ``{"error": "<message>"}``.
     """
     try:
         # FlowRunner exposes no get_queue method; call client directly.
         # get_queue is a read-only probe — it must not queue behind the
         # submission guard, so bypassing the runner is intentional.
-        return await asyncio.to_thread(client.get_queue)
+        raw = await asyncio.to_thread(client.get_queue)
     except ComfyConnectionError as exc:
         return {"error": str(exc)}
+
+    def _summarise(entries: list, state: str) -> list[dict]:
+        # Raw ComfyUI queue entry: [number, prompt_id, prompt_dict, extra_data, outputs_to_execute]
+        return [
+            {"prompt_id": e[1], "position": idx, "state": state}
+            for idx, e in enumerate(entries)
+        ]
+
+    return {
+        "running": _summarise(raw.get("queue_running", []), "running"),
+        "pending": _summarise(raw.get("queue_pending", []), "queued"),
+    }
 
 
 async def cancel_job(prompt_id: str) -> dict[str, Any]:
@@ -329,6 +433,35 @@ async def run_txt2audio(
     except ComfyConnectionError as exc:
         return {"error": str(exc)}
     return _run_result_to_dict(result)
+
+
+async def get_config() -> dict[str, Any]:
+    """Return the active configuration values for this plugin instance.
+
+    No ComfyUI connection required.
+
+    Returns
+    -------
+    dict
+        ``{"comfy_url": str, "workflow_dir": str | None, "asset_ttl": int}``
+
+        ``comfy_url``
+            The root URL used to reach ComfyUI (from ``COMFYUI_URL``, default
+            ``http://localhost:8188``).  Generated assets live under ComfyUI's
+            output root, which is reachable via this URL.
+        ``workflow_dir``
+            Filesystem path where UI-format workflow JSON files are written for
+            live viewing in the ComfyUI canvas (from ``COMFYUI_WORKFLOW_DIR``).
+            ``None`` when the feature is disabled (env var unset).
+        ``asset_ttl``
+            How long (in integer seconds) fetched assets are retained before
+            they may be evicted (from ``COMFYUI_ASSET_TTL``, default ``3600``).
+    """
+    return {
+        "comfy_url": config.comfy_url,
+        "workflow_dir": config.workflow_dir,
+        "asset_ttl": config.asset_ttl,
+    }
 
 
 async def run_txt2video(

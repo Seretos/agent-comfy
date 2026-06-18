@@ -54,8 +54,15 @@ async def list_models() -> dict[str, Any]:
         return {"error": str(exc)}
 
 
-async def list_node_types() -> dict[str, Any]:
+async def list_node_types(name_filter: str = "") -> dict[str, Any]:
     """Return the list of all registered node type names from ComfyUI.
+
+    Parameters
+    ----------
+    name_filter:
+        Optional substring to filter results by.  When non-empty, only node
+        type names containing this string (case-insensitive) are returned.
+        When omitted or empty, all node types are returned.
 
     Returns
     -------
@@ -65,6 +72,9 @@ async def list_node_types() -> dict[str, Any]:
     """
     try:
         node_types = await asyncio.to_thread(_lib_list_node_types, client)
+        if name_filter:
+            lower = name_filter.lower()
+            node_types = [n for n in node_types if lower in n.lower()]
         return {"node_types": node_types}
     except ComfyConnectionError as exc:
         return {"error": str(exc)}
