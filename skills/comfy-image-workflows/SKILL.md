@@ -22,6 +22,8 @@ Returns the checkpoint model names installed in ComfyUI.
 {"checkpoints": ["v1-5-pruned-emaonly.ckpt", "sd_xl_base_1.0.safetensors", ...]}
 ```
 
+Only checkpoint-type model files are returned. Audio- or video-capable checkpoints appear in this same list when installed — scan names for substrings like `"audio"`, `"music"`, or `"video"` to identify them. Separate enumeration of other model types (LoRA, VAE, ControlNet, etc.) is not available in this release.
+
 Use this to pick a value for the checkpoint input of a sampler node or template parameter.
 
 ---
@@ -245,9 +247,9 @@ Returns on connection failure: `{"error": "<message>"}`.
 
 ### Asset retrieval
 
-**`list_assets(outputs: dict)`**
+**`parse_run_outputs(outputs: dict)`**
 
-Parses a ComfyUI history outputs dict and returns a flat list of asset descriptors.
+Parses a run's `outputs` dict and returns a flat list of asset descriptors. Does NOT list server files — it only parses the caller-supplied dict.
 
 Parameters:
 - `outputs` — the outputs dict to parse. On the fast path this is `result["outputs"]` from `run_workflow` / `run_template` (when that call returned `state == "completed"`). On the slow/timeout path this is `job["history"]` from the final `get_job(...)` call (when the generation call returned `state == "running"`).
@@ -261,14 +263,16 @@ Returns:
       "subfolder": "",
       "folder_type": "output",
       "url": "http://localhost:8188/view?filename=...",
-      "mime_type": "image/png",
-      "width": 512,
-      "height": 512,
-      "bytes_size": 123456
+      "mime_type": null,
+      "width": null,
+      "height": null,
+      "bytes_size": null
     }
   ]
 }
 ```
+
+Note: `mime_type`, `width`, `height`, and `bytes_size` are always `null` — they are not populated by `parse_run_outputs` (no separate fetch is performed here).
 
 Returns `{"assets": []}` for empty outputs. Returns `{"error": "<message>"}` on connection failure.
 
@@ -330,7 +334,7 @@ Returns on connection failure: `{"error": "<message>"}`.
    - If `state == "running"`: the timeout was reached before completion — go to step 4.
    - If `state == "failed"`: the job failed; check `error` field for details.
 4. Poll: call `get_job(prompt_id=result["prompt_id"])` in a loop (e.g. every 5 seconds) until `state` is `"completed"` or `"failed"`. When `state == "completed"`, take outputs from `job["history"]` where `job` is the final `get_job(...)` result — do NOT use `result["outputs"]` from the timed-out generation call, as it is unpopulated when `state` was `"running"`.
-5. Call `list_assets(outputs=<outputs>)` where `<outputs>` is: `result["outputs"]` if the generation call already returned `state == "completed"` (fast path), or `job["history"]` from the final `get_job` call if the generation call returned `state == "running"` (slow path). Assign the return value: `assets_result = list_assets(outputs=<outputs>)`.
+5. Call `parse_run_outputs(outputs=<outputs>)` where `<outputs>` is: `result["outputs"]` if the generation call already returned `state == "completed"` (fast path), or `job["history"]` from the final `get_job` call if the generation call returned `state == "running"` (slow path). Assign the return value: `assets_result = parse_run_outputs(outputs=<outputs>)`.
 6. For each asset in `assets_result["assets"]`: call `view_image(filename=asset["filename"], subfolder=asset["subfolder"], folder_type=asset["folder_type"])` to show an inline preview, or `save_asset(filename=..., subfolder=..., folder_type=..., dest_path="<local-path>")` to save to disk.
 
 ### Custom graph path
@@ -353,5 +357,5 @@ Returns on connection failure: `{"error": "<message>"}`.
 
 - ComfyUI processes one job at a time. The plugin serialises submissions through a lock — do not attempt parallel `run_workflow` / `run_template` calls.
 - `timeout` is a client-side deadline, not a cancellation. If the job is still running when the deadline passes, ComfyUI continues executing. Use `cancel_job(prompt_id)` to explicitly remove a pending job from the queue.
-- `get_job` does not return an `outputs` key. On the fast path (generation call returned `state == "completed"`), use `result["outputs"]` directly with `list_assets`. On the slow/timeout path (generation call returned `state == "running"`), the generation result's `outputs` is unpopulated — instead, take outputs from `job["history"]` of the final completed `get_job` call and pass that to `list_assets`.
+- `get_job` does not return an `outputs` key. On the fast path (generation call returned `state == "completed"`), use `result["outputs"]` directly with `parse_run_outputs`. On the slow/timeout path (generation call returned `state == "running"`), the generation result's `outputs` is unpopulated — instead, take outputs from `job["history"]` of the final completed `get_job` call and pass that to `parse_run_outputs`.
 - The model-specific skill file at `.claude/skills/comfy-models/SKILL.md` (written at server startup) lists the installed checkpoints with descriptions. Consult it alongside `list_models()` when choosing a model.

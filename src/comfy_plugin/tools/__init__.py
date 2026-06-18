@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from comfy_plugin.tools.assets import list_assets, save_asset, view_image
+from comfy_plugin.tools.assets import parse_run_outputs, save_asset, view_image
 from comfy_plugin.tools.discovery import get_node_schema, list_models, list_node_types
 from comfy_plugin.tools.generation import (
     cancel_job,
@@ -26,7 +26,7 @@ def register(mcp: FastMCP) -> None:
     mcp.tool()(get_job)
     mcp.tool()(get_queue_status)
     mcp.tool()(cancel_job)
-    mcp.tool()(list_assets)
+    mcp.tool()(parse_run_outputs)
     mcp.tool()(view_image)
     mcp.tool()(save_asset)
     mcp.tool()(list_models)

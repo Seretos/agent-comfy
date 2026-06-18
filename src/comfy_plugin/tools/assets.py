@@ -33,23 +33,38 @@ from comfy_plugin.config import client, comfy_url
 # ---------------------------------------------------------------------------
 
 
-async def list_assets(outputs: dict) -> dict[str, Any]:
-    """Parse a ComfyUI history outputs dict and return a list of asset dicts.
+async def parse_run_outputs(outputs: dict) -> dict[str, Any]:
+    """Parse a run's ``outputs`` dict and return a flat list of asset descriptors.
+
+    Does NOT list server files — it only parses the caller-supplied dict.
 
     Parameters
     ----------
     outputs:
         The ``outputs`` sub-dict from a ``RunResult`` or ``get_history``
         response — a mapping from node ID to that node's output dictionary.
+        Expected shape::
+
+            {
+                "1": {
+                    "images": [
+                        {"filename": "out.png", "subfolder": "", "type": "output"}
+                    ]
+                }
+            }
 
     Returns
     -------
     dict
         ``{"assets": [...]}`` where each entry has keys ``filename``,
         ``subfolder``, ``folder_type``, ``url``, ``mime_type``, ``width``,
-        ``height``, ``bytes_size``.  On connection failure (URL construction
-        uses the live ``comfy_url`` singleton):
-        ``{"error": "<message>"}``.  Empty *outputs* returns
+        ``height``, ``bytes_size``.
+
+        Note: ``width``, ``height``, ``mime_type``, and ``bytes_size`` are
+        ``None`` unless populated by a separate fetch step not performed here.
+
+        On connection failure (URL construction uses the live ``comfy_url``
+        singleton): ``{"error": "<message>"}``.  Empty *outputs* returns
         ``{"assets": []}``.
     """
     try:
@@ -141,7 +156,9 @@ async def save_asset(
     subfolder:
         Sub-directory within the output root, often an empty string.
     folder_type:
-        ComfyUI folder type (e.g. ``"output"``).
+        ComfyUI folder type (e.g. ``"output"``).  Corresponds to the
+        ``folder_type`` key in asset dicts returned by
+        :func:`parse_run_outputs`.
     dest_path:
         Destination file path.  Parent directories are created automatically.
 

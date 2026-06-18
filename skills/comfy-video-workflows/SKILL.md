@@ -20,7 +20,7 @@ Call `run_template(name="generate_video", params={...})` to submit the template 
 ## Prerequisites
 
 1. **ComfyUI is running and reachable.** Set `COMFYUI_URL` if ComfyUI is not on the default `http://localhost:8188`. When ComfyUI is unreachable, every tool returns `{"error": "<message>"}` — handle this gracefully rather than treating it as a fatal error.
-2. **A video-capable model is installed.** Call `list_models()` to confirm available checkpoints. For video generation you typically need a motion-aware or video-specific checkpoint.
+2. **A video-capable model is installed.** Call `list_models()` to confirm available checkpoints. Only checkpoint-type model files are returned — scan names for substrings like `"video"` to identify video-capable ones. For video generation you typically need a motion-aware or video-specific checkpoint.
 3. **The `VHS_VideoCombine` node is available.** Call `list_node_types()` and check that `"VHS_VideoCombine"` appears in the `node_types` list. If it is absent, the VideoHelperSuite ComfyUI custom-node extension is not installed.
 
 ---
@@ -196,10 +196,10 @@ If `COMFYUI_WORKFLOW_DIR` is set, the plugin writes the UI-format workflow JSON 
 
 ## Step 4 — Asset retrieval
 
-Once a job completes, the `outputs` field of the result contains raw ComfyUI node output. Pass it to `list_assets` to extract typed asset entries:
+Once a job completes, the `outputs` field of the result contains raw ComfyUI node output. Pass it to `parse_run_outputs` to extract typed asset entries:
 
 ```python
-asset_list = list_assets(outputs=result["outputs"])
+asset_list = parse_run_outputs(outputs=result["outputs"])
 # {"assets": [{...}, ...]}
 ```
 
@@ -213,10 +213,10 @@ Each entry in `asset_list["assets"]` has these keys:
 | `subfolder`   | string  | Sub-directory within the output root; often an empty string.  |
 | `folder_type` | string  | ComfyUI folder type (e.g. `"output"`).                        |
 | `url`         | string  | Direct URL to fetch the file from ComfyUI.                    |
-| `mime_type`   | string  | MIME type (e.g. `"video/mp4"`, `"image/png"`).                |
-| `width`       | integer | Width in pixels (where applicable; may be `null`).            |
-| `height`      | integer | Height in pixels (where applicable; may be `null`).           |
-| `bytes_size`  | integer | File size in bytes (where available; may be `null`).          |
+| `mime_type`   | null    | Always `null` — not populated by `parse_run_outputs`.         |
+| `width`       | null    | Always `null` — not populated by `parse_run_outputs`.         |
+| `height`      | null    | Always `null` — not populated by `parse_run_outputs`.         |
+| `bytes_size`  | null    | Always `null` — not populated by `parse_run_outputs`.         |
 
 ### Saving a video asset to disk
 
