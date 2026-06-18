@@ -325,7 +325,11 @@ jobs:
           NAME:    ${{ needs.stamp.outputs.plugin_name }}
           TAG:     ${{ needs.stamp.outputs.tag }}
         run: |
-          DESC=$(jq -r '.description' stamped/.claude-plugin/plugin.json)
+          # The "Push orphan release branch" step above ran `git clean -fdx`,
+          # which deleted the untracked `stamped/` artifact dir. Read the
+          # (already version-stamped) manifest from the orphan release branch's
+          # working tree instead — it sits at the repo root now.
+          DESC=$(jq -r '.description' .claude-plugin/plugin.json)
           curl -fsSL -X POST \
             -H "Authorization: Bearer $GH_PAT" \
             -H "Accept: application/vnd.github+json" \
