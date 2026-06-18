@@ -18,6 +18,7 @@ import asyncio
 from typing import Any
 
 from lib_python_comfy import ComfyConnectionError
+from lib_python_comfy import discover_params, list_builtin_templates, load_builtin_template
 from lib_python_comfy import get_node_schema as _lib_get_node_schema
 from lib_python_comfy import list_checkpoints as _lib_list_checkpoints
 from lib_python_comfy import list_node_types as _lib_list_node_types
@@ -90,3 +91,52 @@ async def get_node_schema(node_type: str) -> dict[str, Any]:
         return schema
     except ComfyConnectionError as exc:
         return {"error": str(exc)}
+
+
+async def list_templates() -> dict[str, Any]:
+    """Return the names of all built-in templates. No ComfyUI connection required.
+
+    Returns
+    -------
+    dict
+        ``{"templates": [...]}`` — template stem name strings.
+    """
+    return {"templates": list_builtin_templates()}
+
+
+async def get_template_params(name: str) -> dict[str, Any]:
+    """Return the parameter schema for a named built-in template.
+
+    Discovers all PARAM_* placeholders and returns name/type/required per
+    param. Call before ``run_template`` to know which keys to supply.
+
+    Note naming: keys use the uppercased <NAME> segment of PARAM_* (e.g.
+    POSITIVE_PROMPT), differing from the snake_case scaffold-tool params.
+    Type tags: STR, INT, FLOAT, BOOL, SEED (SEED is always optional,
+    auto-randomised when absent).
+
+    No ComfyUI connection required.
+
+    Parameters
+    ----------
+    name:
+        Built-in template stem name (e.g. ``"txt2img_basic"``).
+
+    Returns
+    -------
+    dict
+        ``{"template": name, "params": [{name, type, required}, ...]}`` on
+        success; ``{"error": "<message>"}`` on unknown template.
+    """
+    try:
+        template = load_builtin_template(name)
+    except FileNotFoundError as exc:
+        return {"error": str(exc)}
+    params = discover_params(template)
+    return {
+        "template": name,
+        "params": [
+            {"name": p.name, "type": p.type, "required": p.required}
+            for p in params
+        ],
+    }

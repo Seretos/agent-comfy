@@ -23,11 +23,13 @@ def test_import_assets_tools():
 
 
 def test_import_discovery_tools():
-    """Regression: all three discovery tool functions must be importable."""
+    """Regression: all five discovery tool functions must be importable."""
     from comfy_plugin.tools.discovery import (  # noqa: F401
         get_node_schema,
+        get_template_params,
         list_models,
         list_node_types,
+        list_templates,
     )
 
 
@@ -36,8 +38,8 @@ def test_import_discovery_tools():
 # ---------------------------------------------------------------------------
 
 
-def test_all_eleven_tools_registered():
-    """All five generation tools plus six new tools must be registered."""
+def test_all_sixteen_tools_registered():
+    """All sixteen tools must be registered; run_scaffold must be absent."""
     from comfy_plugin.server import mcp
 
     tool_names = {t.name for t in mcp._tool_manager.list_tools()}
@@ -47,14 +49,25 @@ def test_all_eleven_tools_registered():
     assert "get_job" in tool_names
     assert "get_queue_status" in tool_names
     assert "cancel_job" in tool_names
-    # New asset tools
+    # Asset tools
     assert "parse_run_outputs" in tool_names
     assert "view_image" in tool_names
     assert "save_asset" in tool_names
-    # New discovery tools
+    # Discovery tools
     assert "list_models" in tool_names
     assert "list_node_types" in tool_names
     assert "get_node_schema" in tool_names
+    # New typed scaffold tools
+    assert "run_txt2img" in tool_names
+    assert "run_txt2audio" in tool_names
+    assert "run_txt2video" in tool_names
+    # New template discovery tools
+    assert "list_templates" in tool_names
+    assert "get_template_params" in tool_names
+    # run_scaffold must be gone
+    assert "run_scaffold" not in tool_names
+    # Verify exact count
+    assert len(tool_names) == 16
 
 
 # ---------------------------------------------------------------------------
@@ -373,3 +386,76 @@ async def test_get_node_schema_unknown_node():
         result = await get_node_schema("NonExistentNode")
 
     assert result == {"required": {}, "optional": {}}
+
+
+# ---------------------------------------------------------------------------
+# list_templates
+# ---------------------------------------------------------------------------
+
+
+async def test_list_templates_returns_txt2img_basic():
+    """list_templates returns a dict with 'templates' containing 'txt2img_basic'."""
+    from comfy_plugin.tools.discovery import list_templates
+
+    result = await list_templates()
+
+    assert "templates" in result
+    assert "txt2img_basic" in result["templates"]
+
+
+async def test_list_templates_returns_list():
+    """list_templates always returns a list under the 'templates' key."""
+    from comfy_plugin.tools.discovery import list_templates
+
+    result = await list_templates()
+
+    assert isinstance(result["templates"], list)
+
+
+# ---------------------------------------------------------------------------
+# get_template_params
+# ---------------------------------------------------------------------------
+
+
+async def test_get_template_params_txt2img_basic():
+    """get_template_params('txt2img_basic') returns expected param schema."""
+    from comfy_plugin.tools.discovery import get_template_params
+
+    result = await get_template_params("txt2img_basic")
+
+    assert result["template"] == "txt2img_basic"
+    params = {p["name"]: p for p in result["params"]}
+
+    # POSITIVE_PROMPT — required, STR
+    assert "POSITIVE_PROMPT" in params
+    assert params["POSITIVE_PROMPT"]["type"] == "STR"
+    assert params["POSITIVE_PROMPT"]["required"] is True
+
+    # MODEL — required, STR
+    assert "MODEL" in params
+    assert params["MODEL"]["type"] == "STR"
+    assert params["MODEL"]["required"] is True
+
+    # STEPS — required, INT
+    assert "STEPS" in params
+    assert params["STEPS"]["type"] == "INT"
+    assert params["STEPS"]["required"] is True
+
+    # NEGATIVE_PROMPT — optional
+    assert "NEGATIVE_PROMPT" in params
+    assert params["NEGATIVE_PROMPT"]["required"] is False
+
+    # SEED — optional, SEED type
+    assert "SEED" in params
+    assert params["SEED"]["type"] == "SEED"
+    assert params["SEED"]["required"] is False
+
+
+async def test_get_template_params_unknown_template_returns_error():
+    """get_template_params with an unknown name returns {'error': ...}."""
+    from comfy_plugin.tools.discovery import get_template_params
+
+    result = await get_template_params("nonexistent_template")
+
+    assert "error" in result
+    assert "nonexistent_template" in result["error"]

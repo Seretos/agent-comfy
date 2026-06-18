@@ -8,13 +8,21 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 
 from comfy_plugin.tools.assets import parse_run_outputs, save_asset, view_image
-from comfy_plugin.tools.discovery import get_node_schema, list_models, list_node_types
+from comfy_plugin.tools.discovery import (
+    get_node_schema,
+    get_template_params,
+    list_models,
+    list_node_types,
+    list_templates,
+)
 from comfy_plugin.tools.generation import (
     cancel_job,
     get_job,
     get_queue_status,
-    run_scaffold,
     run_template,
+    run_txt2audio,
+    run_txt2img,
+    run_txt2video,
     run_workflow,
 )
 
@@ -32,4 +40,8 @@ def register(mcp: FastMCP) -> None:
     mcp.tool()(list_models)
     mcp.tool()(list_node_types)
     mcp.tool()(get_node_schema)
-    mcp.tool()(run_scaffold)
+    mcp.tool()(run_txt2img)
+    mcp.tool()(run_txt2audio)
+    mcp.tool()(run_txt2video)
+    mcp.tool()(list_templates)
+    mcp.tool()(get_template_params)
