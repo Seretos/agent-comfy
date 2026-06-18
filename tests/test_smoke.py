@@ -85,6 +85,7 @@ def test_all_five_tools_registered():
     assert "get_job" in tool_names
     assert "get_queue_status" in tool_names
     assert "cancel_job" in tool_names
+    assert "get_config" in tool_names
     # run_scaffold has been replaced by typed scaffold tools
     assert "run_scaffold" not in tool_names
 
@@ -225,7 +226,7 @@ async def test_get_job_connection_error():
 
 
 async def test_get_queue_status_happy_path():
-    """get_queue_status returns the raw dict from the client."""
+    """get_queue_status returns a summarised dict with running and pending lists."""
     queue_data = {"queue_running": [], "queue_pending": []}
 
     with patch("comfy_plugin.tools.generation.client") as mock_client:
@@ -234,7 +235,33 @@ async def test_get_queue_status_happy_path():
 
         result = await get_queue_status()
 
-    assert result == queue_data
+    assert result == {"running": [], "pending": []}
+
+
+async def test_get_queue_status_with_entries():
+    """get_queue_status summarises queue entries into prompt_id/position/state dicts."""
+    # Raw ComfyUI queue entry: [number, prompt_id, prompt_dict, extra_data, outputs]
+    running_entry = [1, "pid-running", {}, {}, []]
+    pending_entry_a = [2, "pid-pending-a", {}, {}, []]
+    pending_entry_b = [3, "pid-pending-b", {}, {}, []]
+    queue_data = {
+        "queue_running": [running_entry],
+        "queue_pending": [pending_entry_a, pending_entry_b],
+    }
+
+    with patch("comfy_plugin.tools.generation.client") as mock_client:
+        mock_client.get_queue = MagicMock(return_value=queue_data)
+        from comfy_plugin.tools.generation import get_queue_status
+
+        result = await get_queue_status()
+
+    assert result["running"] == [
+        {"prompt_id": "pid-running", "position": 0, "state": "running"}
+    ]
+    assert result["pending"] == [
+        {"prompt_id": "pid-pending-a", "position": 0, "state": "queued"},
+        {"prompt_id": "pid-pending-b", "position": 1, "state": "queued"},
+    ]
 
 
 async def test_get_queue_status_connection_error():

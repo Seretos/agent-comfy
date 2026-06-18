@@ -17,6 +17,7 @@ from comfy_plugin.tools.discovery import (
 )
 from comfy_plugin.tools.generation import (
     cancel_job,
+    get_config,
     get_job,
     get_queue_status,
     run_template,
@@ -34,6 +35,7 @@ def register(mcp: FastMCP) -> None:
     mcp.tool()(get_job)
     mcp.tool()(get_queue_status)
     mcp.tool()(cancel_job)
+    mcp.tool()(get_config)
     mcp.tool()(parse_run_outputs)
     mcp.tool()(view_image)
     mcp.tool()(save_asset)

@@ -33,13 +33,18 @@ def test_import_discovery_tools():
     )
 
 
+def test_import_get_config():
+    """Regression: get_config must be importable from generation tools."""
+    from comfy_plugin.tools.generation import get_config  # noqa: F401
+
+
 # ---------------------------------------------------------------------------
 # Tool registration
 # ---------------------------------------------------------------------------
 
 
-def test_all_sixteen_tools_registered():
-    """All sixteen tools must be registered; run_scaffold must be absent."""
+def test_all_seventeen_tools_registered():
+    """All seventeen tools must be registered; run_scaffold must be absent."""
     from comfy_plugin.server import mcp
 
     tool_names = {t.name for t in mcp._tool_manager.list_tools()}
@@ -49,6 +54,8 @@ def test_all_sixteen_tools_registered():
     assert "get_job" in tool_names
     assert "get_queue_status" in tool_names
     assert "cancel_job" in tool_names
+    # Config tool
+    assert "get_config" in tool_names
     # Asset tools
     assert "parse_run_outputs" in tool_names
     assert "view_image" in tool_names
@@ -67,7 +74,7 @@ def test_all_sixteen_tools_registered():
     # run_scaffold must be gone
     assert "run_scaffold" not in tool_names
     # Verify exact count
-    assert len(tool_names) == 16
+    assert len(tool_names) == 17
 
 
 # ---------------------------------------------------------------------------
