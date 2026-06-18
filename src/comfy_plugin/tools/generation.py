@@ -227,8 +227,16 @@ async def run_scaffold(
             - ``seed`` (int, default 0)
 
         *txt2audio* kwargs:
+            - ``model`` (str, required) — audio model checkpoint filename.
             - ``positive`` (str, default ``""``)
             - ``negative`` (str, default ``""``)
+            - ``seconds`` (float, default 47.0)
+            - ``batch_size`` (int, default 1)
+            - ``sample_rate`` (int, default 44100)
+            - ``steps`` (int, default 20)
+            - ``cfg`` (float, default 3.5)
+            - ``sampler_name`` (str, default ``"dpmpp_3m_sde_gpu"``)
+            - ``scheduler`` (str, default ``"exponential"``)
             - ``seed`` (int, default 0)
 
         *txt2video* kwargs:
@@ -261,6 +269,8 @@ async def run_scaffold(
 
     try:
         graph: GraphBuilder = scaffold_fn(**params)
+    except NotImplementedError as exc:
+        return {"error": str(exc)}
     except TypeError as exc:
         return {"error": str(exc)}
 
