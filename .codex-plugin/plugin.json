@@ -1,0 +1,19 @@
+{
+  "name": "agent-comfy",
+  "version": "0.0.3",
+  "description": "MCP server for driving ComfyUI - submit workflows, manage the prompt queue, and fetch generated images",
+  "author": {
+    "name": "Arne von Appen"
+  },
+  "repository": "https://github.com/Seretos/agent-comfy",
+  "mcpServers": {
+    "comfy": {
+      "command": "${PLUGIN_ROOT}/bin/comfy",
+      "args": []
+    }
+  },
+  "interface": {
+    "displayName": "Agent Comfy",
+    "shortDescription": "MCP server for driving ComfyUI - submit workflows, manage the prompt queue, and fetch generated images"
+  }
+}
