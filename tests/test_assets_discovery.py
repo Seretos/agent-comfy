@@ -19,7 +19,7 @@ from lib_python_comfy.preview import PreviewResult
 
 def test_import_assets_tools():
     """Regression: all three asset tool functions must be importable."""
-    from comfy_plugin.tools.assets import list_assets, save_asset, view_image  # noqa: F401
+    from comfy_plugin.tools.assets import parse_run_outputs, save_asset, view_image  # noqa: F401
 
 
 def test_import_discovery_tools():
@@ -48,7 +48,7 @@ def test_all_eleven_tools_registered():
     assert "get_queue_status" in tool_names
     assert "cancel_job" in tool_names
     # New asset tools
-    assert "list_assets" in tool_names
+    assert "parse_run_outputs" in tool_names
     assert "view_image" in tool_names
     assert "save_asset" in tool_names
     # New discovery tools
@@ -58,12 +58,12 @@ def test_all_eleven_tools_registered():
 
 
 # ---------------------------------------------------------------------------
-# list_assets
+# parse_run_outputs
 # ---------------------------------------------------------------------------
 
 
-async def test_list_assets_happy_path():
-    """list_assets returns a list of asset dicts with url fields."""
+async def test_parse_run_outputs_happy_path():
+    """parse_run_outputs returns a list of asset dicts with url fields."""
     outputs = {
         "1": {
             "images": [
@@ -71,9 +71,9 @@ async def test_list_assets_happy_path():
             ]
         }
     }
-    from comfy_plugin.tools.assets import list_assets
+    from comfy_plugin.tools.assets import parse_run_outputs
 
-    result = await list_assets(outputs)
+    result = await parse_run_outputs(outputs)
 
     assert "assets" in result
     assert len(result["assets"]) == 1
@@ -85,17 +85,17 @@ async def test_list_assets_happy_path():
     assert "ComfyUI_00001_.png" in asset_dict["url"]
 
 
-async def test_list_assets_empty_outputs():
-    """list_assets with empty outputs dict returns empty assets list."""
-    from comfy_plugin.tools.assets import list_assets
+async def test_parse_run_outputs_empty_outputs():
+    """parse_run_outputs with empty outputs dict returns empty assets list."""
+    from comfy_plugin.tools.assets import parse_run_outputs
 
-    result = await list_assets({})
+    result = await parse_run_outputs({})
 
     assert result == {"assets": []}
 
 
-async def test_list_assets_multiple_assets():
-    """list_assets extracts assets from multiple nodes."""
+async def test_parse_run_outputs_multiple_assets():
+    """parse_run_outputs extracts assets from multiple nodes."""
     outputs = {
         "1": {
             "images": [
@@ -109,15 +109,15 @@ async def test_list_assets_multiple_assets():
             ]
         },
     }
-    from comfy_plugin.tools.assets import list_assets
+    from comfy_plugin.tools.assets import parse_run_outputs
 
-    result = await list_assets(outputs)
+    result = await parse_run_outputs(outputs)
 
     assert len(result["assets"]) == 3
 
 
-async def test_list_assets_asset_dict_keys():
-    """list_assets asset dicts include all required keys."""
+async def test_parse_run_outputs_asset_dict_keys():
+    """parse_run_outputs asset dicts include all required keys."""
     outputs = {
         "1": {
             "images": [
@@ -125,9 +125,9 @@ async def test_list_assets_asset_dict_keys():
             ]
         }
     }
-    from comfy_plugin.tools.assets import list_assets
+    from comfy_plugin.tools.assets import parse_run_outputs
 
-    result = await list_assets(outputs)
+    result = await parse_run_outputs(outputs)
 
     asset = result["assets"][0]
     for key in ("filename", "subfolder", "folder_type", "url", "mime_type", "width", "height", "bytes_size"):

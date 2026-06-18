@@ -40,7 +40,7 @@ list_models()
 -> {"error": "<message>"}   # ComfyUI unreachable
 ```
 
-Look for names containing `audio`, `music`, `speech`, `voice`, or `sound` to identify audio-capable checkpoints.
+Only checkpoint-type model files are returned. Look for names containing `audio`, `music`, `speech`, `voice`, or `sound` to identify audio-capable checkpoints. Separate enumeration of other model types (LoRA, VAE, ControlNet, etc.) is not available in this release.
 
 ### list_node_types
 
@@ -88,7 +88,7 @@ run_template(name: str, params: dict, timeout: float = 120.0)
 -> {
      "prompt_id": "<uuid>",
      "state":     "completed" | "running" | "failed" | ...,
-     "outputs":   {...},   # node-id-keyed output dict; pass to list_assets
+     "outputs":   {...},   # node-id-keyed output dict; pass to parse_run_outputs
      "history":   {...},
      "error":     null | "<message>"
    }
@@ -210,7 +210,7 @@ get_job(prompt_id: str)
 2. If `state == "running"`, wait a few seconds, then call `get_job(prompt_id)`.
 3. Repeat until `state` is `"completed"` or `"failed"`.
 4. On `"completed"`:
-   - If the job completed synchronously (returned by `run_template` or `run_workflow`), use the top-level `outputs` field directly with `list_assets`.
+   - If the job completed synchronously (returned by `run_template` or `run_workflow`), use the top-level `outputs` field directly with `parse_run_outputs`.
    - If the job completed after polling with `get_job`, there is **no** top-level `outputs` key in the `get_job` response — only `prompt_id`, `state`, `history`, and `error`. The `history` value is the raw ComfyUI history payload whose internal structure is not documented here. In this case, prefer re-submitting with a longer `timeout` to obtain a synchronous result with a top-level `outputs` field, or extract output file references from `history` according to the ComfyUI history format if you are familiar with it.
 5. On `"failed"`, inspect `error` and report it to the user.
 
@@ -222,12 +222,12 @@ Do not call `get_job` in a tight loop — a 3–5 second pause between polls is 
 
 Once a job completes, the generated audio file lives in ComfyUI's output directory. Use the asset tools to locate and retrieve it.
 
-### list_assets
+### parse_run_outputs
 
-Parse the `outputs` dict from the run result to enumerate generated files.
+Parse the `outputs` dict from the run result to enumerate generated files. Does NOT list server files — it only parses the caller-supplied dict.
 
 ```
-list_assets(outputs: dict)
+parse_run_outputs(outputs: dict)
 -> {
      "assets": [
        {
@@ -235,10 +235,10 @@ list_assets(outputs: dict)
          "subfolder":   "",
          "folder_type": "output",
          "url":         "http://localhost:8188/view?filename=...&type=output",
-         "mime_type":   "audio/wav",
+         "mime_type":   null,
          "width":       null,
          "height":      null,
-         "bytes_size":  2345678
+         "bytes_size":  null
        },
        ...
      ]
@@ -246,7 +246,9 @@ list_assets(outputs: dict)
 -> {"error": "<message>"}
 ```
 
-Pass the `outputs` value from the `run_template` or `run_workflow` response. These tools return a top-level `outputs` key that can be passed directly to `list_assets`. Note: `get_job` does **not** return a top-level `outputs` key — see the polling section above for how to handle that case. Audio assets typically have `mime_type` of `"audio/wav"`, `"audio/flac"`, or `"audio/mpeg"`.
+Note: `mime_type`, `width`, `height`, and `bytes_size` are always `null` — they are not populated by `parse_run_outputs` (no separate fetch is performed here).
+
+Pass the `outputs` value from the `run_template` or `run_workflow` response. These tools return a top-level `outputs` key that can be passed directly to `parse_run_outputs`. Note: `get_job` does **not** return a top-level `outputs` key — see the polling section above for how to handle that case.
 
 ### save_asset
 
@@ -254,9 +256,9 @@ Download an asset from ComfyUI and write it to a local path on the machine runni
 
 ```
 save_asset(
-    filename:    str,   # from list_assets entry
-    subfolder:   str,   # from list_assets entry
-    folder_type: str,   # from list_assets entry
+    filename:    str,   # from parse_run_outputs entry
+    subfolder:   str,   # from parse_run_outputs entry
+    folder_type: str,   # from parse_run_outputs entry
     dest_path:   str    # absolute or relative destination path; parent dirs created automatically
 )
 -> {"saved": "<resolved-absolute-path>"}
@@ -271,7 +273,7 @@ save_asset(
 
 ```python
 # 1. Get the assets from the completed run result
-assets_result = list_assets(outputs=run_result["outputs"])
+assets_result = parse_run_outputs(outputs=run_result["outputs"])
 
 # 2. Find audio files
 audio_assets = [
@@ -310,7 +312,7 @@ if result.get("error"):
 | `"not found"` in `run_template` | Template stem does not exist yet (lib issue #13) | Use Path B (`run_workflow`) |
 | `"Missing required parameter"` | A `PARAM_*` key was omitted from `params` | Add the missing key per the template's spec |
 | `"Connection refused"` / `"Cannot connect"` | ComfyUI is not running or `COMFYUI_URL` is wrong | Ask the user to start ComfyUI or set `COMFYUI_URL` |
-| `"error"` in `list_assets` | The `outputs` dict was empty or malformed | Confirm the job state is `"completed"` before calling |
+| `"error"` in `parse_run_outputs` | The `outputs` dict was empty or malformed | Confirm the job state is `"completed"` before calling |
 | `"error"` in `save_asset` | Network failure fetching from ComfyUI | Retry once; then report to user |
 
 ---

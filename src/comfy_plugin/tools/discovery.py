@@ -33,6 +33,13 @@ from comfy_plugin.config import client
 async def list_models() -> dict[str, Any]:
     """Return the list of available checkpoint model names from ComfyUI.
 
+    Scope: only checkpoint-type model files are returned (those registered
+    under the ``checkpoints`` folder in ComfyUI).  Audio- or video-capable
+    checkpoints appear in this same list when installed — scan names for
+    substrings like ``"audio"``, ``"music"``, or ``"video"`` to identify them.
+    Separate enumeration of other model types (LoRA, VAE, ControlNet, etc.) is
+    not available in this release.
+
     Returns
     -------
     dict
