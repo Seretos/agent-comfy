@@ -88,7 +88,18 @@ async def test_run_txt2img_connection_error():
 
 
 async def test_run_txt2img_writes_workflow_file(tmp_path):
-    """run_txt2img writes a UI workflow JSON file when workflow_dir is set."""
+    """run_txt2img writes a UI workflow JSON file when workflow_dir is set.
+
+    Also asserts the written file is a valid, loadable/executable ComfyUI UI
+    workflow (lib-python-comfy v0.0.3 keys) rather than just "some JSON
+    file exists": real slot types on every wired link/socket (no literal
+    "UNKNOWN", which is what the unfixed v0.0.2 `to_ui()` emitted), non-empty
+    `widgets_values` on nodes with widgets, and the top-level `last_node_id` /
+    `last_link_id` bookkeeping keys the ComfyUI canvas requires to load a
+    workflow.
+    """
+    import json
+
     expected = _make_run_result(prompt_id="img-wf")
 
     with (
@@ -109,6 +120,28 @@ async def test_run_txt2img_writes_workflow_file(tmp_path):
     assert result.get("error") is None
     json_files = list(tmp_path.glob("*.json"))
     assert len(json_files) == 1
+
+    ui_dict = json.loads(json_files[0].read_text(encoding="utf-8"))
+
+    # Top-level bookkeeping keys ComfyUI's canvas needs to load the file.
+    assert "last_node_id" in ui_dict
+    assert "last_link_id" in ui_dict
+
+    nodes = ui_dict["nodes"]
+    assert nodes, "expected at least one node in the exported workflow"
+
+    # Every wired input/output slot must carry a real type, not the
+    # "UNKNOWN" placeholder the unfixed v0.0.2 to_ui() emitted.
+    for node in nodes:
+        for slot in [*node.get("inputs", []), *node.get("outputs", [])]:
+            assert slot.get("type") != "UNKNOWN", (
+                f"node {node.get('id')} slot {slot.get('name')!r} has "
+                "UNKNOWN type"
+            )
+
+    # At least one node (e.g. the checkpoint loader) has non-empty
+    # widgets_values reflecting the submitted params.
+    assert any(node.get("widgets_values") for node in nodes)
 
 
 async def test_run_txt2img_defaults_accepted():
