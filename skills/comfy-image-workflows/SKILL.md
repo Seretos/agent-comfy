@@ -184,7 +184,7 @@ Each key is a string node ID. Each value has exactly two keys: `class_type` (the
 }
 ```
 
-Use `get_node_schema(node_type)` to discover the exact required and optional inputs for any node before wiring it. The node IDs (`"1"`, `"2"`, ...) are arbitrary strings — they must be unique within the prompt and consistent across both the API dict and any UI-format workflow file written by `COMFYUI_WORKFLOW_DIR`.
+Use `get_node_schema(node_type)` to discover the exact required and optional inputs for any node before wiring it. The node IDs (`"1"`, `"2"`, ...) are arbitrary strings — they must be unique within the prompt. Note: `run_workflow` does not itself write a `COMFYUI_WORKFLOW_DIR` UI-format file (only `run_txt2img`/`run_txt2audio` do); if you build and export a matching UI workflow by other means, keep its node IDs consistent with the API dict.
 
 ---
 
@@ -349,7 +349,7 @@ Returns on connection failure: `{"error": "<message>"}`.
 
 ## Environment variables
 
-**`COMFYUI_WORKFLOW_DIR`** (optional) — when set to a filesystem path, the plugin writes a UI-format workflow JSON file there alongside each submission. This file can be opened directly in the ComfyUI canvas for live viewing. The node IDs in the UI file match the API-format IDs. This is an environment-level opt-in; no MCP tool controls it.
+**`COMFYUI_WORKFLOW_DIR`** (optional) — when set to a filesystem path, `run_txt2img` and `run_txt2audio` write a UI-format workflow JSON file there before submission (`run_workflow`, `run_template`, and `run_txt2video` do not). This file can be opened directly in the ComfyUI canvas for live viewing. The node IDs in the UI file match the API-format IDs. This is an environment-level opt-in; no MCP tool controls it.
 
 ---
 
