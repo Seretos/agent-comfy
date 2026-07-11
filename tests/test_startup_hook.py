@@ -206,6 +206,47 @@ async def test_hook_degrades_when_lib_missing(tmp_path: Path) -> None:
     assert not (skills_dir / "SKILL.md").exists()
 
 
+async def test_hook_degrades_when_lib_missing_and_skills_dir_set_warns(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """_DISCOVERY_AVAILABLE=False AND COMFYUI_SKILLS_DIR set (explicit opt-in)
+    → hook returns without writing, and a WARNING is emitted to stderr."""
+    import comfy_plugin.startup as startup_mod
+
+    mock_client = MagicMock()
+    skills_dir = tmp_path / "skills"
+
+    with (
+        patch.object(startup_mod, "_DISCOVERY_AVAILABLE", False),
+        patch.dict(os.environ, {"COMFYUI_SKILLS_DIR": str(skills_dir)}),
+    ):
+        await startup_mod.run_model_discovery_hook(mock_client, skills_dir)
+
+    assert not (skills_dir / "SKILL.md").exists()
+    captured = capsys.readouterr()
+    assert "WARNING" in captured.err
+
+
+async def test_hook_degrades_when_lib_missing_and_skills_dir_unset_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """_DISCOVERY_AVAILABLE=False AND COMFYUI_SKILLS_DIR unset (default,
+    auto-resolved via git-root walk-up) → hook returns without writing, and
+    stderr stays silent (no WARNING) since this is the common case."""
+    import comfy_plugin.startup as startup_mod
+
+    mock_client = MagicMock()
+    skills_dir = tmp_path / "skills"
+
+    monkeypatch.delenv("COMFYUI_SKILLS_DIR", raising=False)
+    with patch.object(startup_mod, "_DISCOVERY_AVAILABLE", False):
+        await startup_mod.run_model_discovery_hook(mock_client, skills_dir)
+
+    assert not (skills_dir / "SKILL.md").exists()
+    captured = capsys.readouterr()
+    assert "WARNING" not in captured.err
+
+
 async def test_hook_degrades_when_discovery_raises(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
