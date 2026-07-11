@@ -13,6 +13,7 @@ WARNING to stderr, and the server continues without crashing.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,14 @@ async def run_model_discovery_hook(client: Any, skills_dir: Path) -> None:
     Degrades gracefully on every error path — never raises.
     """
     if not _DISCOVERY_AVAILABLE:
+        if os.environ.get("COMFYUI_SKILLS_DIR"):
+            print(
+                "WARNING: COMFYUI_SKILLS_DIR is set, but model discovery is "
+                "unavailable (discover_models/enrich_with_huggingface are not "
+                "present in the currently pinned lib-python-comfy); SKILL.md "
+                "will not be written.",
+                file=sys.stderr,
+            )
         return
 
     try:
