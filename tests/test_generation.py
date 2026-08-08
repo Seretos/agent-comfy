@@ -242,6 +242,230 @@ async def test_run_txt2audio_missing_positive_returns_error():
         Txt2AudioParams(model="audio.ckpt")  # positive is required
 
 
+async def test_run_txt2audio_forwards_clip_params_to_scaffold():
+    """Txt2AudioParams(clip_name=..., clip_type=..., seconds_start=...) forwards
+    all three verbatim to txt2audio(...)."""
+    from lib_python_comfy import txt2audio as real_txt2audio
+
+    captured_kwargs: dict = {}
+
+    def recording_txt2audio(**kwargs):
+        captured_kwargs.update(kwargs)
+        return real_txt2audio(**kwargs)
+
+    expected = _make_run_result(prompt_id="audio-clip")
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", None),
+        patch(
+            "comfy_plugin.tools.generation.txt2audio",
+            side_effect=recording_txt2audio,
+        ),
+    ):
+        mock_runner.run = AsyncMock(return_value=expected)
+
+        from comfy_plugin.tools.generation import Txt2AudioParams, run_txt2audio
+
+        params = Txt2AudioParams(
+            model="stable-audio-open-1.0.safetensors",
+            positive="rain on the roof",
+            clip_name="t5xxl.safetensors",
+            clip_type="stable_audio",
+            seconds_start=2.5,
+        )
+        result = await run_txt2audio(params)
+
+    assert result.get("error") is None
+    assert captured_kwargs.get("clip_name") == "t5xxl.safetensors"
+    assert captured_kwargs.get("clip_type") == "stable_audio"
+    assert captured_kwargs.get("seconds_start") == 2.5
+
+
+async def test_run_txt2audio_forwards_falsy_seconds_start():
+    """seconds_start=0.0 alongside clip_name must still reach the scaffold;
+    guards against a regression to a truthiness-based (``if v:``) filter,
+    which would silently swallow the legitimate falsy value 0.0."""
+    from lib_python_comfy import txt2audio as real_txt2audio
+
+    captured_kwargs: dict = {}
+
+    def recording_txt2audio(**kwargs):
+        captured_kwargs.update(kwargs)
+        return real_txt2audio(**kwargs)
+
+    expected = _make_run_result(prompt_id="audio-clip-zero")
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", None),
+        patch(
+            "comfy_plugin.tools.generation.txt2audio",
+            side_effect=recording_txt2audio,
+        ),
+    ):
+        mock_runner.run = AsyncMock(return_value=expected)
+
+        from comfy_plugin.tools.generation import Txt2AudioParams, run_txt2audio
+
+        params = Txt2AudioParams(
+            model="stable-audio-open-1.0.safetensors",
+            positive="rain",
+            clip_name="t5xxl.safetensors",
+            seconds_start=0.0,
+        )
+        result = await run_txt2audio(params)
+
+    assert result.get("error") is None
+    assert "seconds_start" in captured_kwargs
+    assert captured_kwargs["seconds_start"] == 0.0
+
+
+async def test_run_txt2audio_omits_unset_clip_params():
+    """With no clip args supplied, the captured kwargs must contain none of
+    the three new keys, so the lib's own (non-None) defaults win rather than
+    a mirrored constant that could drift from the lib on the next bump."""
+    from lib_python_comfy import txt2audio as real_txt2audio
+
+    captured_kwargs: dict = {}
+
+    def recording_txt2audio(**kwargs):
+        captured_kwargs.update(kwargs)
+        return real_txt2audio(**kwargs)
+
+    expected = _make_run_result(prompt_id="audio-no-clip")
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", None),
+        patch(
+            "comfy_plugin.tools.generation.txt2audio",
+            side_effect=recording_txt2audio,
+        ),
+    ):
+        mock_runner.run = AsyncMock(return_value=expected)
+
+        from comfy_plugin.tools.generation import Txt2AudioParams, run_txt2audio
+
+        params = Txt2AudioParams(
+            model="stable-audio-open-1.0.safetensors",
+            positive="rain",
+        )
+        result = await run_txt2audio(params)
+
+    assert result.get("error") is None
+    assert "clip_name" not in captured_kwargs
+    assert "clip_type" not in captured_kwargs
+    assert "seconds_start" not in captured_kwargs
+
+
+async def test_run_txt2audio_with_clip_name_routes_through_cliploader():
+    """Regression test for the reported defect: checkpoints with no bundled
+    text encoder (e.g. ``stable-audio-open-1.0.safetensors``, the scaffold's
+    own documented example) resolve the checkpoint's CLIP output slot to
+    ``None``, so every call failed with
+    ``RuntimeError: clip input is invalid: None``. Supplying ``clip_name``
+    must route both ``CLIPTextEncode`` nodes through a ``CLIPLoader`` node
+    instead of the checkpoint's CLIP slot, and the Stable Audio conditioning
+    stage must carry ``seconds_start``.
+
+    Node names confirmed by probing the installed lib-python-comfy v0.0.5
+    directly (``inspect.signature`` + a sample ``to_api`` dump): the
+    conditioning node's real ``class_type`` is ``ConditioningStableAudio``
+    with inputs ``seconds_start``/``seconds_total``, matching the ticket.
+    """
+    expected = _make_run_result(prompt_id="audio-cliploader")
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", None),
+    ):
+        mock_runner.run = AsyncMock(return_value=expected)
+
+        from comfy_plugin.tools.generation import Txt2AudioParams, run_txt2audio
+
+        params = Txt2AudioParams(
+            model="stable-audio-open-1.0.safetensors",
+            positive="rain on the roof",
+            clip_name="t5xxl.safetensors",
+            clip_type="stable_audio",
+            seconds_start=1.5,
+        )
+        result = await run_txt2audio(params)
+
+    assert result.get("error") is None
+    prompt = mock_runner.run.await_args.args[0]
+
+    cliploader_ids = [
+        nid for nid, node in prompt.items() if node["class_type"] == "CLIPLoader"
+    ]
+    assert len(cliploader_ids) == 1
+    cliploader_id = cliploader_ids[0]
+
+    checkpoint_ids = {
+        nid
+        for nid, node in prompt.items()
+        if node["class_type"] == "CheckpointLoaderSimple"
+    }
+
+    clip_text_encode_nodes = [
+        node for node in prompt.values() if node["class_type"] == "CLIPTextEncode"
+    ]
+    assert clip_text_encode_nodes, "expected at least one CLIPTextEncode node"
+    for node in clip_text_encode_nodes:
+        clip_source_id = node["inputs"]["clip"][0]
+        assert clip_source_id == cliploader_id
+        assert clip_source_id not in checkpoint_ids
+
+    conditioning_nodes = [
+        node
+        for node in prompt.values()
+        if node["class_type"] == "ConditioningStableAudio"
+    ]
+    assert len(conditioning_nodes) == 1
+    assert conditioning_nodes[0]["inputs"]["seconds_start"] == 1.5
+
+
+async def test_run_txt2audio_without_clip_name_uses_checkpoint_clip():
+    """Backward compatibility: omitting clip_name preserves today's
+    checkpoint-CLIP graph shape (no CLIPLoader node; both CLIPTextEncode
+    nodes reference the CheckpointLoaderSimple node's CLIP output slot)."""
+    expected = _make_run_result(prompt_id="audio-no-clip-graph")
+
+    with (
+        patch("comfy_plugin.tools.generation.runner") as mock_runner,
+        patch("comfy_plugin.config.workflow_dir", None),
+    ):
+        mock_runner.run = AsyncMock(return_value=expected)
+
+        from comfy_plugin.tools.generation import Txt2AudioParams, run_txt2audio
+
+        params = Txt2AudioParams(
+            model="audio_model.safetensors",
+            positive="forest ambience",
+        )
+        result = await run_txt2audio(params)
+
+    assert result.get("error") is None
+    prompt = mock_runner.run.await_args.args[0]
+
+    assert not any(node["class_type"] == "CLIPLoader" for node in prompt.values())
+
+    checkpoint_ids = {
+        nid
+        for nid, node in prompt.items()
+        if node["class_type"] == "CheckpointLoaderSimple"
+    }
+    assert checkpoint_ids
+
+    clip_text_encode_nodes = [
+        node for node in prompt.values() if node["class_type"] == "CLIPTextEncode"
+    ]
+    assert clip_text_encode_nodes
+    for node in clip_text_encode_nodes:
+        assert node["inputs"]["clip"][0] in checkpoint_ids
+
+
 # ---------------------------------------------------------------------------
 # run_txt2video
 # ---------------------------------------------------------------------------
