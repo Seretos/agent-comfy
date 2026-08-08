@@ -66,6 +66,9 @@ class Txt2AudioParams(BaseModel):
     sampler_name: str = "dpmpp_3m_sde_gpu"
     scheduler: str = "exponential"
     seed: int = 0
+    clip_name: str | None = None
+    clip_type: str | None = None
+    seconds_start: float | None = None
 
 
 class Txt2VideoParams(BaseModel):
@@ -403,6 +406,15 @@ async def run_txt2audio(
     Note: ``params`` is a nested object — pass it as ``{"params": {"model":
     "...", "positive": "...", ...}}``, not as flat top-level keys.
 
+    Some checkpoints (e.g. ``stable-audio-open-1.0.safetensors``, this
+    scaffold's own documented example) bundle no text encoder of their own —
+    submitting without ``clip_name`` against such a checkpoint fails with
+    ``RuntimeError: clip input is invalid: None``. Set ``clip_name`` (plus,
+    optionally, ``clip_type`` and ``seconds_start``) to route both CLIP text
+    encoders through an explicit ``CLIPLoader`` instead of the checkpoint's
+    own CLIP output. Omitting ``clip_name`` preserves the current
+    checkpoint-CLIP wiring, unchanged.
+
     Parameters
     ----------
     params:
@@ -411,7 +423,12 @@ async def run_txt2audio(
         batch_size (int, default 1), sample_rate (int, default 44100), steps
         (int, default 20), cfg (float, default 3.5), sampler_name (str, default
         "dpmpp_3m_sde_gpu"), scheduler (str, default "exponential"), seed (int,
-        default 0).
+        default 0), clip_name (str, optional; omitted → lib default, uses the
+        checkpoint's own CLIP; required for checkpoints with no bundled text
+        encoder such as "stable-audio-open-1.0.safetensors"), clip_type (str,
+        optional; omitted → lib default; only meaningful together with
+        clip_name), seconds_start (float, optional; omitted → lib default;
+        only meaningful together with clip_name).
     timeout:
         Maximum seconds to wait for completion.
 
@@ -422,7 +439,7 @@ async def run_txt2audio(
         ``error``. On connection failure: ``{"error": "<message>"}``.
     """
     try:
-        graph: GraphBuilder = txt2audio(**params.model_dump())
+        graph: GraphBuilder = txt2audio(**params.model_dump(exclude_none=True))
     except TypeError as exc:
         return {"error": str(exc)}
     ui_dict = to_ui(graph)
