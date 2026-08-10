@@ -1,6 +1,10 @@
+---
+name: comfy-video-workflows
+description: Generate a video via ComfyUI — submit the built-in template or build a custom workflow using VHS_VideoCombine (VideoHelperSuite) with a motion model, then save the result as an mp4. Load this skill whenever the user asks to generate a video with ComfyUI.
+---
+
 # ComfyUI Video Workflow Authoring
 
-**Trigger:** When asked to generate a video with ComfyUI.
 **Medium:** video
 **Prerequisite:** ComfyUI reachable at `COMFYUI_URL` (default `http://localhost:8188`).
 
