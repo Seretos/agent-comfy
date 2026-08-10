@@ -1,0 +1,14 @@
+{
+  "name": "agent-comfy",
+  "description": "MCP server for driving ComfyUI - submit workflows, manage the prompt queue, and fetch generated images",
+  "version": "0.0.7",
+  "author": {
+    "name": "Arne von Appen"
+  },
+  "mcpServers": {
+    "comfy": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/comfy",
+      "args": []
+    }
+  }
+}
