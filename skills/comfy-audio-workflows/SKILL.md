@@ -1,7 +1,6 @@
 ---
 name: comfy-audio-workflows
-description: How to generate audio (music, speech, sound effects) via ComfyUI using the agent-comfy MCP tools.
-trigger: Use this skill whenever the user asks to generate, synthesize, or produce any form of audio — music, voice, sound effects, or speech — via ComfyUI.
+description: Generate or synthesize audio via ComfyUI — music, speech, sound effects (SFX), voice-over, ambience, or other sound cues, producing a WAV file. Load this skill whenever the user asks to generate audio; use it to queue a job, poll a running job, and save the generated file to disk.
 ---
 
 ## When to use this skill
@@ -26,7 +25,7 @@ If ComfyUI is not reachable, all tools return `{"error": "<message>"}`. Report t
 
 ---
 
-## Discover available nodes and models
+## Discover available nodes, models, and templates
 
 Always run discovery before constructing a workflow if you have not already done so in this session.
 
@@ -73,13 +72,122 @@ get_node_schema(node_type="MusicgenNode")
 -> {"error": "<message>"}
 ```
 
-Always call `get_node_schema` on every audio node you plan to use before building a manual workflow (Path B). Node schemas differ across ComfyUI custom-node packages; never assume the field names.
+Always call `get_node_schema` on every audio node you plan to use before building a manual workflow (Path C). Node schemas differ across ComfyUI custom-node packages; never assume the field names.
+
+### list_templates
+
+Returns the stem names of all built-in workflow templates. No ComfyUI connection required.
+
+```
+list_templates()
+-> {"templates": ["txt2img_basic", "generate_audio", ...]}
+```
+
+Call this instead of guessing a template stem — do not assume a name exists just because it appears in this or another skill's documentation.
+
+### get_template_params
+
+Returns the parameter schema for a named built-in template. No ComfyUI connection required.
+
+```
+get_template_params(name="generate_audio")
+-> {
+     "template": "generate_audio",
+     "params": [
+       {"name": "POSITIVE_PROMPT", "type": "STR",  "required": true},
+       {"name": "SEED",            "type": "SEED", "required": false},
+       ...
+     ]
+   }
+-> {"error": "<message>"}  # unknown template
+```
+
+Param keys are the uppercased `<NAME>` portion of each `PARAM_*` placeholder in the template. Type tags: `STR`, `INT`, `FLOAT`, `BOOL`, `SEED` (`SEED` is always optional, auto-randomised when omitted). Call `list_templates()` and `get_template_params("generate_audio")` before guessing stems or param keys for Path B.
 
 ---
 
-## Path A — built-in template (recommended)
+## Path A — `run_txt2audio` (recommended)
 
-`run_template` loads a pre-built workflow template by name, substitutes your parameter values, and submits it to ComfyUI in one call. Use this path whenever the required template is available — it avoids the need to construct and validate a raw API-format workflow dict.
+`run_txt2audio` builds a complete audio-generation pipeline graph internally from a small set of parameters and submits it to ComfyUI in one call. This is the recommended path: unlike the Path B template (a minimal scaffold), it wires a full generation pipeline, not just an output node.
+
+### Signature
+
+```
+run_txt2audio(params: Txt2AudioParams, timeout: float = 120.0)
+-> {
+     "prompt_id": "<uuid>",
+     "state":     "completed" | "running" | "failed" | ...,
+     "outputs":   {...},   # node-id-keyed output dict; pass to parse_run_outputs
+     "history":   {...},
+     "error":     null | "<message>"
+   }
+-> {"error": "<message>"}  # missing required field, or ComfyUI unreachable
+```
+
+Note: `params` is a **nested object** — pass it as `{"params": {"model": "...", "positive": "...", ...}}`, not as flat top-level keys.
+
+### Parameters (`Txt2AudioParams` fields)
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `model` | string | *required* | Checkpoint name from `list_models()`. |
+| `positive` | string | *required* | Positive prompt text. |
+| `negative` | string | `""` | Negative prompt text. |
+| `seconds` | float | `47.0` | Duration of the generated audio. |
+| `batch_size` | int | `1` | Number of clips to generate. |
+| `sample_rate` | int | `44100` | Output sample rate. |
+| `steps` | int | `20` | Sampler steps. |
+| `cfg` | float | `3.5` | Classifier-free guidance scale. |
+| `sampler_name` | string | `"dpmpp_3m_sde_gpu"` | Sampler algorithm. |
+| `scheduler` | string | `"exponential"` | Noise schedule. |
+| `seed` | int | `0` | Explicit seed. |
+| `clip_name` | string | *omitted* | Optional. See gotcha below. |
+| `clip_type` | string | *omitted* | Optional; only meaningful together with `clip_name`. |
+| `seconds_start` | float | *omitted* | Optional; only meaningful together with `clip_name`. |
+
+Only `model` and `positive` are required — every other field has a usable default.
+
+### Gotcha: checkpoints with no bundled text encoder
+
+Some checkpoints (e.g. `stable-audio-open-1.0.safetensors`) bundle no text encoder of their own. Submitting without `clip_name` against such a checkpoint fails with:
+
+```
+RuntimeError: clip input is invalid: None
+```
+
+Set `clip_name` (optionally also `clip_type` and `seconds_start`) to route both CLIP text encoders through an explicit `CLIPLoader` instead of the checkpoint's own CLIP output. Omitting `clip_name` preserves the default checkpoint-CLIP wiring, which is correct for checkpoints that do bundle a text encoder.
+
+### UI workflow file
+
+If `COMFYUI_WORKFLOW_DIR` is set, `run_txt2audio` writes the UI-format workflow JSON to that directory before submission, so the user can open it in the ComfyUI canvas and watch live node highlighting.
+
+### Example call
+
+```python
+run_txt2audio(
+    params={
+        "model":    "musicgen-small.safetensors",
+        "positive": "upbeat jazz piano, bright, 120 bpm",
+        "seconds":  15.0,
+        "seed":     42,
+    },
+    timeout=300.0,
+)
+```
+
+### Failure modes
+
+| `error` content | Cause | Action |
+|-----------------|-------|--------|
+| `"clip input is invalid: None"` | Checkpoint has no bundled text encoder | Set `clip_name` (and optionally `clip_type`/`seconds_start`) |
+| Pydantic validation error mentioning `model` or `positive` | A required field was omitted from `params` | Supply both `model` and `positive` |
+| `"Connection refused"` / `"Cannot connect"` | ComfyUI is not running or `COMFYUI_URL` is wrong | Ask the user to start ComfyUI |
+
+---
+
+## Path B — `run_template("generate_audio")` (minimal scaffold / pipeline smoke-test)
+
+`run_template` loads a pre-built workflow template by name, substitutes your parameter values, and submits it to ComfyUI in one call. The built-in `generate_audio` template is a **minimal scaffold** — useful for testing the submission/retrieval pipeline end-to-end, but it is not a substitute for the full generation pipeline that Path A builds.
 
 ### Signature
 
@@ -100,27 +208,25 @@ run_template(name: str, params: dict, timeout: float = 120.0)
 | Parameter | Type | Notes |
 |-----------|------|-------|
 | `name` | string | Template stem — see below. |
-| `params` | dict | Keys are the UPPERCASED `<NAME>` portion of each `PARAM_*` placeholder in the template. Obtain the required keys from the template's documentation or by inspecting a template file directly. |
+| `params` | dict | Keys are the UPPERCASED `<NAME>` portion of each `PARAM_*` placeholder in the template. Call `get_template_params(name)` to get the exact keys rather than guessing. |
 | `timeout` | float | Seconds to wait before giving up (default 120). Audio generation is substantially slower than image generation — use at least `300` for music clips longer than 10 seconds, and up to `600` for long-form generation. |
 
 ### Template name for audio
 
-The audio built-in template stem is `"audio_basic"` — this follows the same naming convention as the image template `"txt2img_basic"`.
-
-> **Note:** Replace `audio_basic` with the actual template stem once `lib-python-comfy` v0.0.2+ (lib issue #13) is installed. Until that release, the template file does not exist and the tool will return `{"error": "... not found ..."}`. If you receive that error, fall back to Path B.
+The audio built-in template stem is `generate_audio`. Do not guess or reuse a stem from another medium (e.g. the image template's `txt2img_basic`) — call `list_templates()` to see every valid stem, and `get_template_params("generate_audio")` to get the exact `params` keys it expects.
 
 ### Example call
 
 ```python
+params = get_template_params(name="generate_audio")["params"]
+# Inspect params to know which PARAM_* keys are required before calling:
 run_template(
-    name="audio_basic",
+    name="generate_audio",
     params={
-        "PROMPT":   "upbeat jazz piano, bright, 120 bpm",
-        "DURATION": 15.0,
-        "MODEL":    "musicgen-small.safetensors",
-        "SEED":     42
+        "POSITIVE_PROMPT": "upbeat jazz piano, bright, 120 bpm",
+        "SEED":             42,
     },
-    timeout=300.0
+    timeout=300.0,
 )
 ```
 
@@ -128,15 +234,15 @@ run_template(
 
 | `error` content | Cause | Action |
 |-----------------|-------|--------|
-| `"... not found ..."` | Template stem does not exist (lib issue #13 not yet shipped) | Fall back to Path B |
-| `"Missing required parameter: ..."` | A required `PARAM_*` key was omitted from `params` | Add the missing key |
+| `"... not found ..."` | The template stem passed to `name` does not exist — this is not a permanent condition, just a wrong or outdated name | Call `list_templates()` to see the real names, then retry with the correct one |
+| `"Missing required parameter: ..."` | A required `PARAM_*` key was omitted from `params` | Call `get_template_params("generate_audio")` to see the required keys, then add the missing one |
 | `"Connection refused"` / `"Cannot connect"` | ComfyUI is not running or `COMFYUI_URL` is wrong | Ask the user to start ComfyUI |
 
 ---
 
-## Path B — manual API-format workflow (advanced)
+## Path C — manual API-format workflow (advanced)
 
-Use `run_workflow` when no built-in template covers your use case, or when the user needs fine-grained control over the node graph. You are responsible for constructing a valid API-format prompt dict.
+Use `run_workflow` when no built-in template or scaffold tool covers your use case, or when the user needs fine-grained control over the node graph. You are responsible for constructing a valid API-format prompt dict.
 
 ### Signature
 
@@ -185,11 +291,13 @@ The `prompt` dict is node-id-keyed. Each entry must contain `class_type` and `in
 4. Wire node outputs with `[<source_node_id>, <output_port_index>]` — check the schema to know how many outputs each node exposes and in what order.
 5. Set `timeout` generously — audio can take several minutes on CPU or an under-loaded GPU.
 
+Note: `run_workflow` does not itself write a `COMFYUI_WORKFLOW_DIR` UI-format file (only `run_txt2audio`/`run_txt2img` do); if you build and export a matching UI workflow by other means, keep its node IDs consistent with the API dict.
+
 ---
 
 ## Polling long-running jobs
 
-When `run_template` or `run_workflow` returns with `"state": "running"` (the timeout was reached before completion), poll with `get_job` until the job reaches a terminal state.
+When `run_txt2audio`, `run_template`, or `run_workflow` returns with `"state": "running"` (the timeout was reached before completion), poll with `get_job` until the job reaches a terminal state.
 
 ### Signature
 
@@ -206,11 +314,11 @@ get_job(prompt_id: str)
 
 ### Polling pattern
 
-1. Call `run_template` or `run_workflow` with a reasonable `timeout` (e.g. 60 seconds as a progress heartbeat).
+1. Call `run_txt2audio`, `run_template`, or `run_workflow` with a reasonable `timeout` (e.g. 60 seconds as a progress heartbeat).
 2. If `state == "running"`, wait a few seconds, then call `get_job(prompt_id)`.
 3. Repeat until `state` is `"completed"` or `"failed"`.
 4. On `"completed"`:
-   - If the job completed synchronously (returned by `run_template` or `run_workflow`), use the top-level `outputs` field directly with `parse_run_outputs`.
+   - If the job completed synchronously (returned by the generation call), use the top-level `outputs` field directly with `parse_run_outputs`.
    - If the job completed after polling with `get_job`, there is **no** top-level `outputs` key in the `get_job` response — only `prompt_id`, `state`, `history`, and `error`. The `history` value is the raw ComfyUI history payload whose internal structure is not documented here. In this case, prefer re-submitting with a longer `timeout` to obtain a synchronous result with a top-level `outputs` field, or extract output file references from `history` according to the ComfyUI history format if you are familiar with it.
 5. On `"failed"`, inspect `error` and report it to the user.
 
@@ -248,7 +356,7 @@ parse_run_outputs(outputs: dict)
 
 Note: `mime_type`, `width`, `height`, and `bytes_size` are always `null` — they are not populated by `parse_run_outputs` (no separate fetch is performed here).
 
-Pass the `outputs` value from the `run_template` or `run_workflow` response. These tools return a top-level `outputs` key that can be passed directly to `parse_run_outputs`. Note: `get_job` does **not** return a top-level `outputs` key — see the polling section above for how to handle that case.
+Pass the `outputs` value from the `run_txt2audio`, `run_template`, or `run_workflow` response. These tools return a top-level `outputs` key that can be passed directly to `parse_run_outputs`. Note: `get_job` does **not** return a top-level `outputs` key — see the polling section above for how to handle that case.
 
 ### save_asset
 
@@ -278,7 +386,7 @@ assets_result = parse_run_outputs(outputs=run_result["outputs"])
 # 2. Find audio files
 audio_assets = [
     a for a in assets_result["assets"]
-    if a["mime_type"].startswith("audio/")
+    if a["filename"].endswith(".wav")
 ]
 
 # 3. Save each one locally
@@ -299,7 +407,10 @@ for asset in audio_assets:
 Every tool in this plugin returns a plain dict. A missing or `null` `"error"` key means success; a non-null `"error"` string means the operation failed. Always check before proceeding.
 
 ```python
-result = run_template(name="audio_basic", params={...}, timeout=300.0)
+result = run_txt2audio(
+    params={"model": "musicgen-small.safetensors", "positive": "ambient rain"},
+    timeout=300.0,
+)
 if result.get("error"):
     # surface the error to the user; do not attempt asset retrieval
     raise RuntimeError(result["error"])
@@ -309,8 +420,9 @@ if result.get("error"):
 
 | Error text pattern | Likely cause | Recommended action |
 |--------------------|-------------|-------------------|
-| `"not found"` in `run_template` | Template stem does not exist yet (lib issue #13) | Use Path B (`run_workflow`) |
-| `"Missing required parameter"` | A `PARAM_*` key was omitted from `params` | Add the missing key per the template's spec |
+| `"clip input is invalid: None"` from `run_txt2audio` | Checkpoint has no bundled text encoder | Set `clip_name` (and optionally `clip_type`/`seconds_start`) |
+| `"not found"` in `run_template` | The `name` passed is not a real template stem — call `list_templates()` to see the real names | Retry `run_template` (Path B) with a valid stem, e.g. `"generate_audio"` |
+| `"Missing required parameter"` | A `PARAM_*` key was omitted from `params` | Call `get_template_params(name)` and add the missing key per the template's spec |
 | `"Connection refused"` / `"Cannot connect"` | ComfyUI is not running or `COMFYUI_URL` is wrong | Ask the user to start ComfyUI or set `COMFYUI_URL` |
 | `"error"` in `parse_run_outputs` | The `outputs` dict was empty or malformed | Confirm the job state is `"completed"` before calling |
 | `"error"` in `save_asset` | Network failure fetching from ComfyUI | Retry once; then report to user |
@@ -326,13 +438,21 @@ ComfyUI processes one prompt at a time. If you need to inspect or clean the queu
 ```
 get_queue_status()
 -> {
-     "queue_running": [...],   # prompts currently executing (0 or 1)
-     "queue_pending": [...]    # prompts waiting
+     "running": [...],   # jobs currently executing (0 or 1 entries)
+     "pending": [...]    # jobs waiting in the queue
    }
 -> {"error": "<message>"}
 ```
 
-Call this before submitting a long audio job if you suspect the queue is backed up. If `queue_pending` is non-empty, warn the user that their job will wait.
+Each entry in both lists is a dict with these keys:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `prompt_id` | string | Identifier of the queued/running job. |
+| `position` | int | Zero-based index within its own list (0 = next to run, or currently running). |
+| `state` | string | `"running"` for entries in the `running` list, `"queued"` for entries in the `pending` list. |
+
+Call this before submitting a long audio job if you suspect the queue is backed up. If the `pending` list is non-empty, warn the user that their job will wait.
 
 ### cancel_job
 
@@ -342,4 +462,4 @@ cancel_job(prompt_id: str)
 -> {"error": "<message>"}  # ComfyUI unreachable
 ```
 
-`cancel_job` only removes a job from the **pending** queue. A job that is already running (in `queue_running`) cannot be interrupted this way — the user must stop ComfyUI manually to abort an in-progress generation.
+`cancel_job` only removes a job from the `pending` list. A job that is already executing (present in the `running` list) cannot be interrupted this way — the user must stop ComfyUI manually to abort an in-progress generation.

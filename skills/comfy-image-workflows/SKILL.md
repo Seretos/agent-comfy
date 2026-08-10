@@ -1,3 +1,8 @@
+---
+name: comfy-image-workflows
+description: Generate an image via ComfyUI — submit a txt2img template or build a custom ComfyUI workflow with a checkpoint and KSampler, then save or preview the generated image. Load this skill whenever the user asks to generate an image, create artwork, or run a ComfyUI workflow.
+---
+
 # ComfyUI Image Workflow Skill
 
 Load this skill when the user asks to generate an image, create artwork, run a ComfyUI workflow, or produce visual output via ComfyUI. It covers both paths: submitting a ready-made template and building a bespoke node graph from scratch. Audio and video are out of scope here.
