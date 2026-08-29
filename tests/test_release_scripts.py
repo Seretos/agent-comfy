@@ -18,14 +18,57 @@ authoritative CI leg for these tests.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+
+def _resolve_bash() -> str | None:
+    """Resolve a real bash executable, avoiding the Windows WSL launcher stub.
+
+    Windows ships a built-in stub at ``C:\\Windows\\System32\\bash.exe`` (the
+    WSL launcher) even when WSL itself isn't installed. On the GitHub
+    Actions ``windows-latest`` runner this stub sits on PATH ahead of Git
+    for Windows' real bash, so a plain ``shutil.which("bash")`` resolves to
+    a binary that immediately fails with a "WSL not installed" error
+    instead of running the script. Detect and route around that case; on
+    non-Windows platforms behavior is unchanged.
+    """
+    resolved = shutil.which("bash")
+
+    if sys.platform != "win32":
+        return resolved
+
+    if resolved is not None and "system32" not in resolved.lower():
+        return resolved
+
+    # Either nothing resolved, or the resolved path is the WSL stub -- try
+    # Git for Windows' well-known install location instead. This is exactly
+    # the path GitHub Actions' own `shell: bash` resolves to on this runner
+    # image.
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    for candidate in (
+        Path(program_files) / "Git" / "bin" / "bash.exe",
+        Path(r"C:\Program Files\Git\bin\bash.exe"),
+    ):
+        if candidate.is_file():
+            return str(candidate)
+
+    # Nothing better found -- fall back to whatever shutil.which found
+    # (even the WSL stub, or None). Better to attempt and fail informatively
+    # than to silently skip everything; the skip-guard below is meant for
+    # "no bash at all available", not "wrong bash found".
+    return resolved
+
+
+_BASH = _resolve_bash()
+
 pytestmark = pytest.mark.skipif(
-    not all(shutil.which(tool) for tool in ("bash", "git", "awk", "sort")),
+    not all((_BASH, shutil.which("git"), shutil.which("awk"), shutil.which("sort"))),
     reason="bash/git/awk/sort not all present on PATH; ubuntu-22.04 CI is authoritative for these tests",
 )
 
@@ -55,7 +98,7 @@ def _tag(path: Path, name: str) -> None:
 
 def _run_prev_tag(repo: Path, new_tag: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", str(PREV_TAG_SCRIPT), new_tag],
+        [_BASH, str(PREV_TAG_SCRIPT), new_tag],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -63,15 +106,13 @@ def _run_prev_tag(repo: Path, new_tag: str) -> subprocess.CompletedProcess:
 
 
 def _run_payload(env_overrides: dict[str, str]) -> subprocess.CompletedProcess:
-    import os
-
     env = dict(os.environ)
     # Drop CHANGELOG unless explicitly provided by the caller, so "unset"
     # tests aren't accidentally polluted by the ambient environment.
     env.pop("CHANGELOG", None)
     env.update(env_overrides)
     return subprocess.run(
-        ["bash", str(PAYLOAD_SCRIPT)],
+        [_BASH, str(PAYLOAD_SCRIPT)],
         capture_output=True,
         text=True,
         env=env,
