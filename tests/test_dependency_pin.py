@@ -1,6 +1,6 @@
 """Regression guard for the lib-python-comfy sibling-lib pin.
 
-Verifies pyproject.toml pins lib-python-comfy at (at least) v0.0.5 and that
+Verifies pyproject.toml pins lib-python-comfy at (at least) v0.1.1 and that
 the installed environment actually resolves to that version's public
 surface — not a stale v0.0.4 copy shadowed by an editable sibling checkout.
 
@@ -44,8 +44,8 @@ def test_pyproject_declares_lib_python_comfy_dependency():
     )
 
 
-def test_lib_python_comfy_pin_is_at_least_v0_0_5():
-    """The pinned tag must be >= v0.0.5 (floor check, not exact match)."""
+def test_lib_python_comfy_pin_is_at_least_v0_1_1():
+    """The pinned tag must be >= v0.1.1 (floor check, not exact match)."""
     entry = _find_pin_entry()
     assert entry is not None, "lib-python-comfy dependency entry not found in pyproject.toml"
 
@@ -53,8 +53,8 @@ def test_lib_python_comfy_pin_is_at_least_v0_0_5():
     assert match, f"could not parse version tag out of pin entry: {entry!r}"
 
     pinned_version = tuple(int(part) for part in match.groups())
-    assert pinned_version >= (0, 0, 5), (
-        f"lib-python-comfy pin {pinned_version} is below the required floor (0, 0, 5)"
+    assert pinned_version >= (0, 1, 1), (
+        f"lib-python-comfy pin {pinned_version} is below the required floor (0, 1, 1)"
     )
 
 
