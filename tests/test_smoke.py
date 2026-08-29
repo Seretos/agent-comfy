@@ -152,11 +152,17 @@ async def test_run_template_unknown_template_returns_error():
 
 async def test_run_template_missing_param_returns_error():
     """run_template with a missing required param returns an error dict."""
+    from lib_python_comfy.templates import LoadedTemplate, TemplateInfo
+
+    loaded = LoadedTemplate(
+        info=TemplateInfo(name="txt2img_basic", origin="packaged", path="x.json"),
+        data={"1": {}},
+    )
     with (
-        patch("comfy_plugin.tools.generation.load_builtin_template") as mock_load,
+        patch("comfy_plugin.tools.generation.load_template") as mock_load,
         patch("comfy_plugin.tools.generation.render") as mock_render,
     ):
-        mock_load.return_value = {"1": {}}
+        mock_load.return_value = loaded
         from lib_python_comfy import MissingParameterError
 
         mock_render.side_effect = MissingParameterError("PROMPT is required")
@@ -170,12 +176,18 @@ async def test_run_template_missing_param_returns_error():
 
 async def test_run_template_connection_error():
     """run_template catches ComfyConnectionError and returns error dict."""
+    from lib_python_comfy.templates import LoadedTemplate, TemplateInfo
+
+    loaded = LoadedTemplate(
+        info=TemplateInfo(name="txt2img_basic", origin="packaged", path="x.json"),
+        data={},
+    )
     with (
-        patch("comfy_plugin.tools.generation.load_builtin_template") as mock_load,
+        patch("comfy_plugin.tools.generation.load_template") as mock_load,
         patch("comfy_plugin.tools.generation.render") as mock_render,
         patch("comfy_plugin.tools.generation.runner") as mock_runner,
     ):
-        mock_load.return_value = {}
+        mock_load.return_value = loaded
         mock_render.return_value = {}
         mock_runner.run = AsyncMock(side_effect=ComfyConnectionError("timeout"))
         from comfy_plugin.tools.generation import run_template

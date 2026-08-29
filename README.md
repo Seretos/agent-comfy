@@ -45,3 +45,15 @@ pwsh -File scripts/build.ps1 -Clean -Package
 ```
 
 Output on Windows: `bin/comfy.exe`. On Linux: `bin/comfy`. Then install via `/plugin install <path>`.
+
+## Project-local templates
+
+A repository can ship its own ComfyUI workflow templates alongside its code, discoverable and runnable with no manual setup step. Drop template files into the project templates directory and they show up in `list_templates()` immediately.
+
+**Location:** `COMFYUI_PROJECT_TEMPLATES_DIR` env var if set, otherwise `<git-root>/.seretos/comfy/workflows` (resolved by walking up from the working directory for a `.git` ancestor). If neither resolves, project-local templates are disabled and only the built-in templates are available.
+
+**Format requirement:** files in this directory must already be API-format ComfyUI workflow JSON (node-id-keyed `class_type`/`inputs`, the same shape `POST /prompt` accepts) with `PARAM_*` placeholders in place of the values callers should supply — the same convention the built-in templates use. A raw UI-format export from the ComfyUI canvas needs manual conversion first; this plugin does not convert or validate the shape beyond parsing JSON.
+
+**Collision rule:** a project-local template whose filename stem matches a built-in template's name wins the collision at every call site (`list_templates`, `get_template_params`, `run_template`) — it fully replaces the built-in, not adds alongside it.
+
+See the `comfy-template-selection` skill for a fuller decision guide, including per-built-in-template guidance on when to use it.

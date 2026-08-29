@@ -22,7 +22,7 @@ from lib_python_comfy import (
     JobStatus,
     MissingParameterError,
     RunResult,
-    load_builtin_template,
+    load_template,
     render,
     to_api,
     to_ui,
@@ -173,7 +173,7 @@ async def run_workflow(prompt: dict, timeout: float = 120.0) -> dict[str, Any]:
 async def run_template(
     name: str, params: dict[str, Any], timeout: float = 120.0
 ) -> dict[str, Any]:
-    """Load a built-in template, render it with *params*, then submit.
+    """Load a template (built-in or project-local), render it with *params*, then submit.
 
     Tool-chain tip: call ``get_template_params(name)`` first to discover the
     required and optional parameter keys for the template before calling this
@@ -182,7 +182,10 @@ async def run_template(
     Parameters
     ----------
     name:
-        Built-in template stem name (e.g. ``"txt2img_basic"``).
+        Template stem name (e.g. ``"txt2img_basic"``), resolved against the
+        built-in set first, then the project-local templates directory (see
+        ``comfy_plugin.config.template_extra_dirs()``); a project-local
+        template of the same name wins the collision.
     params:
         Parameter values keyed by the uppercased ``<NAME>`` segment of the
         template's ``PARAM_*`` placeholders.
@@ -215,8 +218,8 @@ async def run_template(
         On connection failure: ``{"error": "<message>"}``.
     """
     try:
-        template = load_builtin_template(name)
-        rendered = render(template, params)
+        loaded = load_template(name, extra_dirs=config.template_extra_dirs())
+        rendered = render(loaded.data, params)
         result: RunResult = await runner.run(rendered, timeout=timeout)
         return _run_result_to_dict(result)
     except FileNotFoundError as exc:

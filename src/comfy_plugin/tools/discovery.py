@@ -18,12 +18,19 @@ import asyncio
 from typing import Any
 
 from lib_python_comfy import ComfyConnectionError
-from lib_python_comfy import discover_params, list_builtin_templates, load_builtin_template
+from lib_python_comfy import discover_params
 from lib_python_comfy import get_node_schema as _lib_get_node_schema
 from lib_python_comfy import list_checkpoints as _lib_list_checkpoints
 from lib_python_comfy import list_node_types as _lib_list_node_types
+from lib_python_comfy import list_templates as _lib_list_templates
+from lib_python_comfy import load_template as _lib_load_template
 
+from comfy_plugin import config
 from comfy_plugin.config import client
+
+# Maps the lib's origin vocabulary to the plugin's public wording. Any
+# unmapped origin value passes through unchanged.
+_ORIGIN_LABELS = {"packaged": "built-in", "external": "project"}
 
 
 # ---------------------------------------------------------------------------
@@ -104,18 +111,31 @@ async def get_node_schema(node_type: str) -> dict[str, Any]:
 
 
 async def list_templates() -> dict[str, Any]:
-    """Return the names of all built-in templates. No ComfyUI connection required.
+    """Return the names of all discoverable templates, built-in and project-local.
+
+    Project-local templates are discovered under the directory resolved by
+    ``comfy_plugin.config.template_extra_dirs()`` (see
+    ``COMFYUI_PROJECT_TEMPLATES_DIR``) and win name collisions against a
+    built-in template of the same name. No ComfyUI connection required.
 
     Returns
     -------
     dict
-        ``{"templates": [...]}`` — template stem name strings.
+        ``{"templates": [{"name": str, "origin": str}, ...]}`` — ``origin``
+        is ``"built-in"`` for a packaged template or ``"project"`` for one
+        found in the project-local templates directory.
     """
-    return {"templates": list_builtin_templates()}
+    infos = _lib_list_templates(extra_dirs=config.template_extra_dirs())
+    return {
+        "templates": [
+            {"name": info.name, "origin": _ORIGIN_LABELS.get(info.origin, info.origin)}
+            for info in infos
+        ]
+    }
 
 
 async def get_template_params(name: str) -> dict[str, Any]:
-    """Return the parameter schema for a named built-in template.
+    """Return the parameter schema for a named template, built-in or project-local.
 
     Discovers all PARAM_* placeholders and returns name/type/required per
     param. Call before ``run_template`` to know which keys to supply.
@@ -130,7 +150,10 @@ async def get_template_params(name: str) -> dict[str, Any]:
     Parameters
     ----------
     name:
-        Built-in template stem name (e.g. ``"txt2img_basic"``).
+        Template stem name (e.g. ``"txt2img_basic"``), resolved against the
+        built-in set first, then the project-local templates directory (see
+        ``comfy_plugin.config.template_extra_dirs()``); a project-local
+        template of the same name wins the collision.
 
     Returns
     -------
@@ -139,10 +162,10 @@ async def get_template_params(name: str) -> dict[str, Any]:
         success; ``{"error": "<message>"}`` on unknown template.
     """
     try:
-        template = load_builtin_template(name)
+        loaded = _lib_load_template(name, extra_dirs=config.template_extra_dirs())
     except FileNotFoundError as exc:
         return {"error": str(exc)}
-    params = discover_params(template)
+    params = discover_params(loaded.data)
     return {
         "template": name,
         "params": [
