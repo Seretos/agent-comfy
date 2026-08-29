@@ -34,12 +34,6 @@ on:
 
 permissions:
   contents: write
-  # Needed for "Generate release notes from main history"'s src/<tag>
-  # backfill push: it tags a historical main commit whose .github/workflows/
-  # content differs from the current tip, which GITHUB_TOKEN otherwise
-  # refuses to push ("refusing to allow a GitHub App to create or update
-  # workflow ... without workflows permission").
-  workflows: write
 
 jobs:
   # ------------------------------------------------------------------
