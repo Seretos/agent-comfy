@@ -20,6 +20,17 @@ COMFYUI_SKILLS_DIR
     ``<git-root>/.claude/skills/comfy-models/`` and ensures that path is
     listed in ``<git-root>/.gitignore``.  When no ``.git`` ancestor exists and
     the env var is unset the feature is disabled (returns ``None``).
+COMFYUI_PROJECT_TEMPLATES_DIR
+    Optional filesystem path where project-local ComfyUI templates live.
+    When unset, the code walks up from ``Path.cwd()`` looking for a ``.git``
+    directory; if found it resolves to
+    ``<git-root>/.seretos/comfy/workflows``.  When no ``.git`` ancestor
+    exists and the env var is unset the feature is disabled (``None``).
+    Unlike ``COMFYUI_SKILLS_DIR``, this directory is never registered in
+    ``.gitignore`` — it holds user-authored source the user decides whether
+    to commit, not generated output.  Templates found here must already be
+    API-format JSON with ``PARAM_*`` placeholders, and a project template
+    wins name collisions against a packaged built-in of the same name.
 """
 from __future__ import annotations
 
@@ -47,6 +58,24 @@ runner: FlowRunner = FlowRunner(client, guard)
 
 
 # ---------------------------------------------------------------------------
+# Git-root resolution (shared by skills-dir and project-templates-dir)
+# ---------------------------------------------------------------------------
+
+
+def _find_git_root() -> Path | None:
+    """Walk up from ``Path.cwd()`` looking for a ``.git`` directory.
+
+    Returns the first ancestor (including ``Path.cwd()`` itself) that
+    contains a ``.git`` entry, or ``None`` if none of them do.
+    """
+    current = Path.cwd()
+    for candidate in [current, *current.parents]:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Skills-dir resolution
 # ---------------------------------------------------------------------------
 
@@ -69,21 +98,20 @@ def _resolve_skills_dir() -> Path | None:
         return Path(env_val)
 
     # 2. Walk up from cwd looking for .git.
-    current = Path.cwd()
-    for candidate in [current, *current.parents]:
-        if (candidate / ".git").exists():
-            skills_dir = candidate / ".claude" / "skills" / "comfy-models"
-            # .gitignore update is best-effort; an I/O failure must not
-            # disable the feature or crash startup.
-            try:
-                _ensure_gitignore(candidate)
-            except Exception as exc:
-                print(
-                    f"WARNING: Could not update .gitignore ({exc!r}); "
-                    "skill file will still be written.",
-                    file=sys.stderr,
-                )
-            return skills_dir
+    git_root = _find_git_root()
+    if git_root is not None:
+        skills_dir = git_root / ".claude" / "skills" / "comfy-models"
+        # .gitignore update is best-effort; an I/O failure must not
+        # disable the feature or crash startup.
+        try:
+            _ensure_gitignore(git_root)
+        except Exception as exc:
+            print(
+                f"WARNING: Could not update .gitignore ({exc!r}); "
+                "skill file will still be written.",
+                file=sys.stderr,
+            )
+        return skills_dir
 
     # 3. No git root found and env var not set.
     return None
@@ -102,3 +130,48 @@ def _ensure_gitignore(git_root: Path) -> None:
         prefix = "\n" if existing and not existing.endswith("\n") else ""
         with gitignore_path.open("a", encoding="utf-8") as fh:
             fh.write(f"{prefix}{_GITIGNORE_ENTRY}\n")
+
+
+# ---------------------------------------------------------------------------
+# Project-local templates dir resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_project_templates_dir() -> Path | None:
+    """Return the directory where project-local templates are discovered.
+
+    Resolution order:
+    1. ``COMFYUI_PROJECT_TEMPLATES_DIR`` env var — used as-is if set.
+    2. Walk up from ``Path.cwd()`` for a ``.git`` directory; if found return
+       ``<git-root>/.seretos/comfy/workflows``.
+    3. Neither found — return ``None`` (feature disabled).
+
+    Unlike ``_resolve_skills_dir``, this never touches ``.gitignore`` — the
+    templates dir holds user-authored source, not generated output.
+    """
+    # 1. Explicit env override.
+    env_val = os.environ.get("COMFYUI_PROJECT_TEMPLATES_DIR")
+    if env_val:
+        return Path(env_val)
+
+    # 2. Walk up from cwd looking for .git.
+    git_root = _find_git_root()
+    if git_root is not None:
+        return git_root / ".seretos" / "comfy" / "workflows"
+
+    # 3. No git root found and env var not set.
+    return None
+
+
+project_templates_dir: Path | None = _resolve_project_templates_dir()
+
+
+def template_extra_dirs() -> tuple[Path, ...]:
+    """Return the ``extra_dirs`` tuple to pass to the lib's template loader.
+
+    Only includes ``project_templates_dir`` when it is set *and* currently
+    exists on disk right now; otherwise returns an empty tuple.
+    """
+    if project_templates_dir is not None and project_templates_dir.is_dir():
+        return (project_templates_dir,)
+    return ()

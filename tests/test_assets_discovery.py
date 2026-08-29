@@ -401,22 +401,31 @@ async def test_get_node_schema_unknown_node():
 
 
 async def test_list_templates_returns_txt2img_basic():
-    """list_templates returns a dict with 'templates' containing 'txt2img_basic'."""
+    """list_templates returns a dict with 'templates' containing a
+    {'name': 'txt2img_basic', 'origin': 'built-in'} entry."""
     from comfy_plugin.tools.discovery import list_templates
 
     result = await list_templates()
 
     assert "templates" in result
-    assert "txt2img_basic" in result["templates"]
+    names = [e["name"] for e in result["templates"]]
+    assert "txt2img_basic" in names
+    by_name = {e["name"]: e for e in result["templates"]}
+    assert by_name["txt2img_basic"]["origin"] == "built-in"
 
 
 async def test_list_templates_returns_list():
-    """list_templates always returns a list under the 'templates' key."""
+    """list_templates always returns a list of {name, origin} dicts under the
+    'templates' key."""
     from comfy_plugin.tools.discovery import list_templates
 
     result = await list_templates()
 
     assert isinstance(result["templates"], list)
+    assert all(
+        isinstance(e, dict) and "name" in e and "origin" in e
+        for e in result["templates"]
+    )
 
 
 # ---------------------------------------------------------------------------

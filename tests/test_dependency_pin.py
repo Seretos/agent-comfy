@@ -105,3 +105,38 @@ def test_installed_lib_exposes_v0_0_5_txt2audio_surface():
             "v0.0.5 adds it as an additive keyword param and existing call "
             "sites must remain valid"
         )
+
+
+def test_installed_lib_exposes_extra_dirs_template_surface():
+    """The installed lib_python_comfy must expose list_templates/load_template
+    at the package root, both accepting an extra_dirs parameter.
+
+    Work package #50 (project-local comfy templates) wires config's resolved
+    project-templates directory through to these two functions via extra_dirs.
+    This guard fails loudly if a future pin bump drops either function or its
+    extra_dirs parameter from the surface the wiring depends on.
+    """
+    lib_python_comfy = pytest.importorskip(
+        "lib_python_comfy", reason="lib_python_comfy not importable: environment problem unrelated to the pin"
+    )
+
+    assert hasattr(lib_python_comfy, "list_templates"), (
+        "lib_python_comfy.list_templates is missing at the package root; "
+        "work package #50 imports it from there"
+    )
+    assert hasattr(lib_python_comfy, "load_template"), (
+        "lib_python_comfy.load_template is missing at the package root; "
+        "work package #50 imports it from there"
+    )
+
+    list_templates_sig = inspect.signature(lib_python_comfy.list_templates)
+    assert "extra_dirs" in list_templates_sig.parameters, (
+        "lib_python_comfy.list_templates has no extra_dirs parameter; "
+        "cannot wire up project-local templates without it"
+    )
+
+    load_template_sig = inspect.signature(lib_python_comfy.load_template)
+    assert "extra_dirs" in load_template_sig.parameters, (
+        "lib_python_comfy.load_template has no extra_dirs parameter; "
+        "cannot wire up project-local templates without it"
+    )
