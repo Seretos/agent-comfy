@@ -14,6 +14,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   dispatch:
     runs-on: ubuntu-latest
@@ -32,6 +35,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: release
+
+      # The primary checkout above is `ref: release`, which carries no
+      # `.github/` directory at all (the orphan release branch only holds
+      # install-ready files). Sparse-checkout `main`'s scripts separately so
+      # marketplace-payload.sh is reachable.
+      - name: Checkout release-scripts from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: ci
+          sparse-checkout: .github/scripts
 
       - name: Verify plugin.json version matches tag
         shell: bash
@@ -55,29 +69,42 @@ jobs:
 
       - name: Dispatch to agent-marketplace
         env:
-          GH_PAT:  ${{ secrets.MARKETPLACE_DISPATCH_TOKEN }}
-          NAME:    ${{ steps.meta.outputs.name }}
-          DESC:    ${{ steps.meta.outputs.description }}
-          VERSION: ${{ steps.tag.outputs.version }}
-          TAG:     ${{ steps.tag.outputs.tag }}
+          GH_PAT:   ${{ secrets.MARKETPLACE_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO:     ${{ github.repository }}
+          NAME:     ${{ steps.meta.outputs.name }}
+          DESC:     ${{ steps.meta.outputs.description }}
+          VERSION:  ${{ steps.tag.outputs.version }}
+          TAG:      ${{ steps.tag.outputs.tag }}
         shell: bash
         run: |
-          curl -fsSL -X POST \
+          # The release being re-dispatched is already published, so just
+          # read its notes body straight from the release — no `src/*`/
+          # `MAIN_SHA` marker-tag logic needed here.
+          #
+          # Command substitution strips ALL trailing newlines from its
+          # output. Append a sentinel char before capturing, then strip it
+          # off, so a release body's trailing newlines survive intact. This
+          # MUST be joined with `&&`, not `;`: bash does not inherit
+          # `errexit` into a `$(...)` subshell by default (no
+          # `inherit_errexit`), so a `;`-joined sentinel would let `printf`
+          # run even after `gh release view` fails, silently swallowing the
+          # failure instead of aborting the step. `&&` short-circuits before
+          # `printf` on failure, so the subshell's exit status is still
+          # `gh release view`'s, and the step still fails loudly.
+          CHANGELOG=$(gh release view "$TAG" --repo "$REPO" --json body --jq .body && printf x)
+          CHANGELOG="${CHANGELOG%x}"
+          # `--jq .body` (jq's -r mode) always appends its own trailing
+          # newline after the value, independent of the body's own content.
+          # Strip exactly one trailing newline to undo that: an empty body
+          # collapses to "" (so marketplace-payload.sh's `$changelog == ""`
+          # check still omits the key) and a non-empty body loses only jq's
+          # synthetic newline. If the body's own text also ends in a real
+          # newline, this is indistinguishable from jq's and gets stripped
+          # too — an accepted limitation for a changelog-display field.
+          export CHANGELOG="${CHANGELOG%$'\n'}"
+          ci/.github/scripts/marketplace-payload.sh | curl -fsSL -X POST \
             -H "Authorization: Bearer $GH_PAT" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/Seretos/agent-marketplace/dispatches \
-            -d @- <<EOF
-          {
-            "event_type": "plugin-release",
-            "client_payload": {
-              "name":        "${NAME}",
-              "description": "${DESC}",
-              "repo":        "${{ github.repository }}",
-              "category":    "mcp",
-              "version":     "${VERSION}",
-              "ref":         "${TAG}",
-              "icon":        "https://raw.githubusercontent.com/${{ github.repository }}/${TAG}/assets/icon.png",
-              "description_url": "https://raw.githubusercontent.com/${{ github.repository }}/${TAG}/description.md"
-            }
-          }
-          EOF
+            --data-binary @-

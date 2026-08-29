@@ -19,3 +19,5 @@ dist/
 /bin/
 *.pyinstaller.tmp/
 .process-ticket-result.json
+
+.adev/

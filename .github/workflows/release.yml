@@ -50,7 +50,8 @@ jobs:
         shell: bash
         run: |
           V="${{ inputs.version }}"
-          if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          ONE_ID='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-${ONE_ID}(\.${ONE_ID})*)?$ ]]; then
             echo "::error::Version '$V' is not valid semver (expected MAJOR.MINOR.PATCH[-PRERELEASE])."
             exit 1
           fi
@@ -256,6 +257,72 @@ jobs:
           echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
           echo "asset=$ZIP"   >> "$GITHUB_OUTPUT"
 
+      - name: Generate release notes from main history
+        id: notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The orphan release tag we're about to create shares no
+          # merge-base with `main` or any prior release tag (each release is
+          # a fresh parentless commit under `git checkout --orphan`), so
+          # `gh release create --generate-notes`/`--notes-start-tag` can only
+          # ever see a single commit and would emit an empty changelog. We
+          # tag the current `main` commit as `src/<TAG>` (and backfill
+          # `src/<PREV_TAG>` if it doesn't exist yet) so the notes API has
+          # two commits that genuinely share `main`'s history to diff.
+          git fetch --tags --force origin
+          MAIN_SHA=$(git rev-parse HEAD)
+          TAG="${{ needs.stamp.outputs.tag }}"
+          PREV_TAG_SHORT=$(.github/scripts/prev-release-tag.sh "$TAG")
+          NOTES_DIR=$(mktemp -d)
+          SCRIPTS_DIR=$(mktemp -d)
+          # Copy out of the git worktree so it survives the later
+          # `git clean -fdx` in "Push orphan release branch".
+          cp .github/scripts/marketplace-payload.sh "$SCRIPTS_DIR/"
+
+          if ! git rev-parse -q --verify "refs/tags/src/$TAG" >/dev/null; then
+            git tag "src/$TAG" "$MAIN_SHA"
+            git push origin "src/$TAG"
+          fi
+
+          PREV_ARGS=()
+          if [ -n "$PREV_TAG_SHORT" ]; then
+            if ! git rev-parse -q --verify "refs/tags/src/$PREV_TAG_SHORT" >/dev/null; then
+              # Backfill: find the main commit at/just-before the previous
+              # release's commit time.
+              #
+              # This commit-time heuristic is a known, accepted, one-time
+              # approximation (plan.md, package #53, Approach section) —
+              # every already-published release predates the src/<tag>
+              # marker scheme, so this only fires once per predecessor tag
+              # to backfill its marker, then self-retires (a release that
+              # already has its own src/<tag> marker never re-enters this
+              # branch). It affects only the cosmetic src/…...src/… compare
+              # range shown in generated release notes, never the
+              # orphan-branch/tag/dispatch correctness paths. Raised and
+              # accepted twice already (review rounds 1 and 3) as
+              # intentional, plan-disclosed design — do not "fix" this
+              # without first updating the plan.
+              PREV_COMMIT_TIME=$(git log -1 --format=%cI "$PREV_TAG_SHORT")
+              BACKFILL_SHA=$(git rev-list -1 --before="$PREV_COMMIT_TIME" "$MAIN_SHA")
+              if [ -n "$BACKFILL_SHA" ]; then
+                git tag "src/$PREV_TAG_SHORT" "$BACKFILL_SHA"
+                git push origin "src/$PREV_TAG_SHORT"
+              fi
+            fi
+            if git rev-parse -q --verify "refs/tags/src/$PREV_TAG_SHORT" >/dev/null; then
+              PREV_ARGS=(-f "previous_tag_name=src/$PREV_TAG_SHORT")
+            fi
+          fi
+
+          gh api "repos/${{ github.repository }}/releases/generate-notes" \
+            -f "tag_name=src/$TAG" -f "target_commitish=$MAIN_SHA" \
+            "${PREV_ARGS[@]}" --jq .body > "$NOTES_DIR/notes.md"
+
+          echo "notes_file=$NOTES_DIR/notes.md" >> "$GITHUB_OUTPUT"
+          echo "scripts_dir=$SCRIPTS_DIR" >> "$GITHUB_OUTPUT"
+
       - name: Push orphan release branch and capture commit
         id: rel
         shell: bash
@@ -313,11 +380,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ needs.stamp.outputs.tag }}"
+          # The orphan release tag shares no merge-base with `main` or any
+          # prior release tag (each release is a fresh parentless commit),
+          # so `--generate-notes` can only ever see a single commit and
+          # would emit an empty changelog. Use the notes generated from the
+          # `src/*` marker tags (which do share `main`'s history) instead.
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --target "${{ steps.rel.outputs.sha }}" \
             --title "$TAG" \
-            --generate-notes \
+            --notes-file "${{ steps.notes.outputs.notes_file }}" \
             ${{ contains(inputs.version, '-') && '--prerelease' || '' }} \
             "${{ steps.rel.outputs.asset }}"
 
@@ -327,32 +399,45 @@ jobs:
       - name: Dispatch to agent-marketplace
         shell: bash
         env:
-          GH_PAT:  ${{ secrets.MARKETPLACE_DISPATCH_TOKEN }}
-          VERSION: ${{ inputs.version }}
-          NAME:    ${{ needs.stamp.outputs.plugin_name }}
-          TAG:     ${{ needs.stamp.outputs.tag }}
+          GH_PAT:   ${{ secrets.MARKETPLACE_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO:     ${{ github.repository }}
+          VERSION:  ${{ inputs.version }}
+          NAME:     ${{ needs.stamp.outputs.plugin_name }}
+          TAG:      ${{ needs.stamp.outputs.tag }}
         run: |
           # The "Push orphan release branch" step above ran `git clean -fdx`,
           # which deleted the untracked `stamped/` artifact dir. Read the
           # (already version-stamped) manifest from the orphan release branch's
           # working tree instead — it sits at the repo root now.
-          DESC=$(jq -r '.description' .claude-plugin/plugin.json)
-          curl -fsSL -X POST \
+          export DESC=$(jq -r '.description' .claude-plugin/plugin.json)
+          # The release/tag already exist at this point in the job, so a
+          # failure reading the release body is safe to fail the whole step
+          # on — it's re-runnable via dispatch.yml.
+          #
+          # Command substitution strips ALL trailing newlines from its
+          # output. Append a sentinel char before capturing, then strip it
+          # off, so a release body's trailing newlines survive intact. This
+          # MUST be joined with `&&`, not `;`: bash does not inherit
+          # `errexit` into a `$(...)` subshell by default (no
+          # `inherit_errexit`), so a `;`-joined sentinel would let `printf`
+          # run even after `gh release view` fails, silently swallowing the
+          # failure instead of aborting the step. `&&` short-circuits before
+          # `printf` on failure, so the subshell's exit status is still
+          # `gh release view`'s, and the step still fails loudly.
+          CHANGELOG=$(gh release view "$TAG" --repo "$REPO" --json body --jq .body && printf x)
+          CHANGELOG="${CHANGELOG%x}"
+          # `--jq .body` (jq's -r mode) always appends its own trailing
+          # newline after the value, independent of the body's own content.
+          # Strip exactly one trailing newline to undo that: an empty body
+          # collapses to "" (so marketplace-payload.sh's `$changelog == ""`
+          # check still omits the key) and a non-empty body loses only jq's
+          # synthetic newline. If the body's own text also ends in a real
+          # newline, this is indistinguishable from jq's and gets stripped
+          # too — an accepted limitation for a changelog-display field.
+          export CHANGELOG="${CHANGELOG%$'\n'}"
+          "${{ steps.notes.outputs.scripts_dir }}/marketplace-payload.sh" | curl -fsSL -X POST \
             -H "Authorization: Bearer $GH_PAT" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/Seretos/agent-marketplace/dispatches \
-            -d @- <<EOF
-          {
-            "event_type": "plugin-release",
-            "client_payload": {
-              "name":        "${NAME}",
-              "description": "${DESC}",
-              "repo":        "${{ github.repository }}",
-              "category":    "mcp",
-              "version":     "${VERSION}",
-              "ref":         "${TAG}",
-              "icon":        "https://raw.githubusercontent.com/${{ github.repository }}/${TAG}/assets/icon.png",
-              "description_url": "https://raw.githubusercontent.com/${{ github.repository }}/${TAG}/description.md"
-            }
-          }
-          EOF
+            --data-binary @-
