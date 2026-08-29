@@ -1,6 +1,6 @@
 name: tests
 
-# Runs pytest on every push to any branch and on every PR. Distinct from
+# Runs pytest on every pull request only. Distinct from
 # release.yml, which is workflow_dispatch-driven and produces the OS-specific
 # binaries / release zip.
 #
@@ -9,8 +9,6 @@ name: tests
 # the matrix and switch release.yml to a single-OS pipeline — see AGENTS.md
 # "OS_TARGETS" for the Windows-only override.
 on:
-  push:
-    branches: ["**"]
   pull_request:
 
 permissions:
