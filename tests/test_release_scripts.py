@@ -229,7 +229,7 @@ def test_prev_tag_ignores_foreign_and_marker_tags(tmp_path: Path):
 _BASE_ENV = {
     "NAME": "agent-comfy",
     "DESC": 'a plugin with a "quoted" description',
-    "REPO": "Seretos/agent-comfy",
+    "REPO": "seretos-agents/agent-comfy",
     "VERSION": "0.0.3",
     "TAG": "agent-comfy--v0.0.3",
 }
@@ -269,17 +269,17 @@ def test_payload_with_hostile_changelog_round_trips_exactly():
 
     assert payload["name"] == "agent-comfy"
     assert payload["description"] == env["DESC"]
-    assert payload["repo"] == "Seretos/agent-comfy"
+    assert payload["repo"] == "seretos-agents/agent-comfy"
     assert payload["category"] == "mcp"
     assert payload["version"] == "0.0.3"
     assert payload["ref"] == "agent-comfy--v0.0.3"
     assert (
         payload["icon"]
-        == "https://raw.githubusercontent.com/Seretos/agent-comfy/agent-comfy--v0.0.3/assets/icon.png"
+        == "https://raw.githubusercontent.com/seretos-agents/agent-comfy/agent-comfy--v0.0.3/assets/icon.png"
     )
     assert (
         payload["description_url"]
-        == "https://raw.githubusercontent.com/Seretos/agent-comfy/agent-comfy--v0.0.3/description.md"
+        == "https://raw.githubusercontent.com/seretos-agents/agent-comfy/agent-comfy--v0.0.3/description.md"
     )
     assert payload["changelog"] == hostile_changelog
 
