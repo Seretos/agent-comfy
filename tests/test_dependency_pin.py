@@ -20,7 +20,7 @@ import pytest
 PYPROJECT_PATH = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 _PIN_RE = re.compile(
-    r"^lib-python-comfy @ git\+https://github\.com/Seretos/lib-python-comfy@v(\d+)\.(\d+)\.(\d+)$"
+    r"^lib-python-comfy @ git\+https://github\.com/seretos-agents/lib-python-comfy@v(\d+)\.(\d+)\.(\d+)$"
 )
 
 
@@ -40,7 +40,7 @@ def test_pyproject_declares_lib_python_comfy_dependency():
     assert entry is not None, "lib-python-comfy dependency entry not found in pyproject.toml"
     assert _PIN_RE.match(entry), (
         f"lib-python-comfy dependency entry does not match the expected "
-        f"'git+https://github.com/Seretos/lib-python-comfy@v<tag>' shape: {entry!r}"
+        f"'git+https://github.com/seretos-agents/lib-python-comfy@v<tag>' shape: {entry!r}"
     )
 
 
