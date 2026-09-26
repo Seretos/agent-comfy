@@ -1,0 +1,14 @@
+# Force LF for files Claude Code parses at any nesting depth, and for the
+# root instruction files it reads on startup. Without this, a checkout on a
+# host with core.autocrlf=true (e.g. GitHub's windows-latest runners) can
+# silently rewrite these to CRLF even though the committed blob is LF —
+# CRLF line endings make Claude Code silently ignore these files, and CRLF
+# in a SKILL.md fails tests/test_skill_frontmatter.py's LF guard for reasons
+# unrelated to content correctness.
+#
+# Deliberately narrow: no blanket `* text=auto` rule that would renormalize
+# the whole repo.
+**/SKILL.md text eol=lf
+.claude/** text eol=lf
+/CLAUDE.md text eol=lf
+/AGENTS.md text eol=lf
